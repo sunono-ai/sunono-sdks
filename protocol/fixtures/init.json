@@ -1,0 +1,12 @@
+{
+  "description": "POST /shops/init",
+  "response": {
+    "access_token": "eyJ.test.token",
+    "user_id": "7b1d6f2e-3c4a-4b5d-8e6f-1a2b3c4d5e6f",
+    "session_id": "0e8a4f4c-9d1b-4c2e-a7f3-5b6c7d8e9f00"
+  },
+  "expect": {
+    "token": "eyJ.test.token",
+    "user_id": "7b1d6f2e-3c4a-4b5d-8e6f-1a2b3c4d5e6f"
+  }
+}

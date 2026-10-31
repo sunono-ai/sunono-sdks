@@ -1,0 +1,15 @@
+{
+  "description": "AI off / human owns the chat: render nothing, no retry.",
+  "response": {
+    "reply": "",
+    "session_id": "s1",
+    "paused": true,
+    "typing_hint": false,
+    "action_data": {}
+  },
+  "expect": {
+    "silent": true,
+    "paused": true,
+    "typing_hint": false
+  }
+}

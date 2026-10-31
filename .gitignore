@@ -1,0 +1,13 @@
+.dart_tool/
+build/
+.packages
+pubspec.lock
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.DS_Store
+# Local captures of real backend responses (may contain merchant data)
+flutter/test/_live/
+# Internal notes (plan with backend risks, client-specific guides): never published
+docs/internal/

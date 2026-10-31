@@ -1,0 +1,12 @@
+name: sunono_example
+description: Minimal host app for the sunono package.
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  sunono:
+    path: ../

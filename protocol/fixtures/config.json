@@ -1,0 +1,28 @@
+{
+  "description": "GET /widget/config — enabled shop; extra keys ignored.",
+  "response": {
+    "enabled": true,
+    "primary_color": "#57227D",
+    "launcher_position": "bottom-right",
+    "launcher_icon": null,
+    "header_title_ar": "مساعد المتجر",
+    "header_title_en": "Shop Assistant",
+    "header_title": "مساعد المتجر",
+    "avatar_url": "https://cdn.example.com/a.png",
+    "welcome_message_ar": "أهلين! شو بتدور عليه؟",
+    "welcome_message_en": null,
+    "default_language": "ar",
+    "color_scheme": "light",
+    "typing_hint": true,
+    "future_key": {
+      "x": 1
+    }
+  },
+  "expect": {
+    "enabled": true,
+    "title_ar": "مساعد المتجر",
+    "title_en": "Shop Assistant",
+    "welcome_en_falls_back_to_ar": "أهلين! شو بتدور عليه؟",
+    "typing_hint": true
+  }
+}

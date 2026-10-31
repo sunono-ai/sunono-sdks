@@ -1,0 +1,16 @@
+{
+  "description": "Old bare-array history shape still parses.",
+  "response": [
+    {
+      "role": "user",
+      "text": "hi"
+    }
+  ],
+  "expect": {
+    "rows": 1,
+    "roles": [
+      "user"
+    ],
+    "paused": false
+  }
+}

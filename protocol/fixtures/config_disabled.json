@@ -1,0 +1,9 @@
+{
+  "description": "Kill switch.",
+  "response": {
+    "enabled": false
+  },
+  "expect": {
+    "enabled": false
+  }
+}

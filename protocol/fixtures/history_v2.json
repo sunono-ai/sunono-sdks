@@ -1,0 +1,147 @@
+{
+  "description": "GET /chat/history?shape=v2 with a staff row, a relative image, a stale cart and a pause.",
+  "api_origin": "https://api.sunono.ai",
+  "response": {
+    "messages": [
+      {
+        "role": "user",
+        "sender": "user",
+        "text": "بدي قهوة",
+        "products": [],
+        "msg_ref": null,
+        "image": null,
+        "ts": "2026-10-30T22:20:00+00:00",
+        "has_more": false,
+        "checkout_handoff": null
+      },
+      {
+        "role": "bot",
+        "sender": "bot",
+        "text": "لقيتلك هدول:",
+        "products": [
+          {
+            "public_id": "prod_PHXFLVW6BtRzzTT2",
+            "sku": "coffee-0",
+            "barcode": null,
+            "title_ar": "غوجي هامبيلا",
+            "title_en": "Guji Hambella",
+            "price_jod": 9.0,
+            "discount_jod": null,
+            "price_from": 9.0,
+            "in_stock": true,
+            "low_stock_qty": null,
+            "has_image": true,
+            "img_urls": [
+              "https://images.example.com/guji.jpg"
+            ],
+            "external_url": "https://shop.example/guji",
+            "options_summary": "الوزن: ٢٥٠ جرام، نص كيلو، كيلو · الطحن: حبوب، إسبريسو",
+            "options": [
+              {
+                "key": "weight",
+                "name_ar": "الوزن",
+                "name_en": "Weight",
+                "values": [
+                  {
+                    "key": "250g",
+                    "ar": "٢٥٠ جرام",
+                    "en": "250g",
+                    "exists": true,
+                    "in_stock": true
+                  },
+                  {
+                    "key": "1kg",
+                    "ar": "كيلو",
+                    "en": "1kg",
+                    "exists": true,
+                    "in_stock": false
+                  }
+                ]
+              }
+            ],
+            "metadata": {
+              "origin": "Ethiopia",
+              "roast": "light",
+              "score": 87,
+              "notes": [
+                "x"
+              ]
+            },
+            "similarity": 0.64,
+            "rrf_score": 0.03,
+            "final_score": 1.04,
+            "score_parts": {
+              "base": 1.0
+            },
+            "categories_ar": [],
+            "categories_en": []
+          }
+        ],
+        "msg_ref": "msg_1",
+        "image": null,
+        "ts": "2026-10-30T22:20:05+00:00",
+        "has_more": true,
+        "checkout_handoff": null
+      },
+      {
+        "role": "bot",
+        "sender": "staff",
+        "text": "أهلين، أنا من فريق المتجر",
+        "products": [],
+        "msg_ref": "msg_2",
+        "image": "/api/media/x.jpg",
+        "ts": "2026-10-30T22:21:00+00:00",
+        "has_more": false,
+        "checkout_handoff": {
+          "url": "https://shop.example/jo_ar/checkout/"
+        }
+      }
+    ],
+    "bot_paused_at": "2026-10-30T22:20:59+00:00",
+    "cart": {
+      "items": [
+        {
+          "product_id": "prod_a",
+          "name_ar": "تمر مجهول",
+          "name_en": "Medjool Dates",
+          "qty": 2,
+          "price_fils": 8000,
+          "subtotal_fils": 16000,
+          "img_urls": [
+            "https://images.example.com/d.jpg"
+          ]
+        },
+        {
+          "product_id": "prod_b",
+          "name_ar": "تيشيرت",
+          "name_en": "T-shirt",
+          "qty": 1,
+          "price_fils": 8500,
+          "subtotal_fils": 8500,
+          "img_urls": [],
+          "variant_label": "L / كحلي",
+          "variant_label_en": "L / Navy"
+        }
+      ],
+      "item_count": 2,
+      "stale": true
+    },
+    "cart_linked": true
+  },
+  "expect": {
+    "rows": 3,
+    "roles": [
+      "user",
+      "bot",
+      "staff"
+    ],
+    "row1_products": 1,
+    "row1_has_more": true,
+    "row2_image": "https://api.sunono.ai/api/media/x.jpg",
+    "row2_handoff": "https://shop.example/jo_ar/checkout/",
+    "paused": true,
+    "cart_count": 3,
+    "cart_total_fils": null,
+    "cart_linked": true
+  }
+}

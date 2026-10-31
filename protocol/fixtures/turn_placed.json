@@ -1,0 +1,33 @@
+{
+  "description": "Order placed in chat; placed wins over other checkout keys.",
+  "response": {
+    "reply": "تم الطلب!",
+    "session_id": "s1",
+    "action_data": {
+      "order_placed": true,
+      "order_collect": true,
+      "order": {
+        "order_number": "1042",
+        "items": [
+          {
+            "name_ar": "تمر مجهول",
+            "qty": 2,
+            "subtotal_fils": 16000
+          }
+        ],
+        "delivery_fee_fils": 0,
+        "total_fils": 16500,
+        "savings_fils": 0,
+        "service_fee_fils": 500,
+        "vat_fils": 0
+      }
+    }
+  },
+  "expect": {
+    "checkout": "placed",
+    "order_number": "1042",
+    "lines": 1,
+    "delivery_fee_fils": 0,
+    "total_fils": 16500
+  }
+}

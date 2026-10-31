@@ -1,0 +1,137 @@
+{
+  "description": "Search turn: 3 cards (option product, sale+low stock with unsafe url, out-of-stock without image), has_more, English reply_lang; unknown action_data keys ignored.",
+  "response": {
+    "reply": "**لقيتلك** هدول:\n- اختيار أول",
+    "session_id": "s1",
+    "msg_ref": "msg_abc123",
+    "action_data": {
+      "products": [
+        {
+          "public_id": "prod_PHXFLVW6BtRzzTT2",
+          "sku": "coffee-0",
+          "barcode": null,
+          "title_ar": "غوجي هامبيلا",
+          "title_en": "Guji Hambella",
+          "price_jod": 9.0,
+          "discount_jod": null,
+          "price_from": 9.0,
+          "in_stock": true,
+          "low_stock_qty": null,
+          "has_image": true,
+          "img_urls": [
+            "https://images.example.com/guji.jpg"
+          ],
+          "external_url": "https://shop.example/guji",
+          "options_summary": "الوزن: ٢٥٠ جرام، نص كيلو، كيلو · الطحن: حبوب، إسبريسو",
+          "options": [
+            {
+              "key": "weight",
+              "name_ar": "الوزن",
+              "name_en": "Weight",
+              "values": [
+                {
+                  "key": "250g",
+                  "ar": "٢٥٠ جرام",
+                  "en": "250g",
+                  "exists": true,
+                  "in_stock": true
+                },
+                {
+                  "key": "1kg",
+                  "ar": "كيلو",
+                  "en": "1kg",
+                  "exists": true,
+                  "in_stock": false
+                }
+              ]
+            }
+          ],
+          "metadata": {
+            "origin": "Ethiopia",
+            "roast": "light",
+            "score": 87,
+            "notes": [
+              "x"
+            ]
+          },
+          "similarity": 0.64,
+          "rrf_score": 0.03,
+          "final_score": 1.04,
+          "score_parts": {
+            "base": 1.0
+          },
+          "categories_ar": [],
+          "categories_en": []
+        },
+        {
+          "public_id": "prod_golden0002",
+          "sku": "lip-balm-01",
+          "title_ar": "مرطب شفايف بيزلين",
+          "title_en": "Vaseline Lip Balm",
+          "price_jod": 3.5,
+          "discount_jod": 2.75,
+          "in_stock": true,
+          "low_stock_qty": 3,
+          "has_image": true,
+          "img_urls": [
+            "https://images.example.com/lip.jpg"
+          ],
+          "external_url": "javascript:alert(1)",
+          "metadata": {}
+        },
+        {
+          "public_id": "prod_golden0004",
+          "title_ar": "تغليف هدايا",
+          "title_en": null,
+          "price_jod": 1.0,
+          "in_stock": false,
+          "has_image": false,
+          "img_urls": [
+            "https://images.example.com/hidden.jpg"
+          ],
+          "metadata": {}
+        }
+      ],
+      "has_more": true,
+      "reply_lang": "ar",
+      "products_text": "internal",
+      "page_start": 0,
+      "named_item_missing": false
+    }
+  },
+  "expect": {
+    "reply_sanitized": "لقيتلك هدول:\nاختيار أول",
+    "msg_ref": "msg_abc123",
+    "products": 3,
+    "has_more": true,
+    "reply_lang": "ar",
+    "card0": {
+      "public_id": "prod_PHXFLVW6BtRzzTT2",
+      "sku": "coffee-0",
+      "price_from": 9.0,
+      "options_line_en": "Weight: 250g (1kg sold out)",
+      "chips": [
+        "Ethiopia",
+        "light",
+        "87"
+      ],
+      "image": "https://images.example.com/guji.jpg",
+      "external_url": "https://shop.example/guji"
+    },
+    "card1": {
+      "sku": "lip-balm-01",
+      "discount_jod": 2.75,
+      "low_stock_qty": 3,
+      "external_url": null
+    },
+    "card2": {
+      "sku": null,
+      "in_stock": false,
+      "images": 0,
+      "title_en": "تغليف هدايا"
+    },
+    "cart_present": false,
+    "checkout": null,
+    "silent": false
+  }
+}

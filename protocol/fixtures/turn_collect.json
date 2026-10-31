@@ -1,0 +1,50 @@
+{
+  "description": "Chat checkout collecting fields.",
+  "response": {
+    "reply": "شو اسمك ورقم تلفونك؟",
+    "session_id": "s1",
+    "action_data": {
+      "order_collect": true,
+      "known": {
+        "name": "ليان",
+        "area": ""
+      },
+      "missing_fields": [
+        {
+          "key": "phone",
+          "type": "phone",
+          "label_ar": "رقم التلفون",
+          "required": true
+        },
+        {
+          "key": "area",
+          "type": "text",
+          "label_ar": "المنطقة (وين نوصّل)",
+          "label_en": "Area",
+          "required": true
+        }
+      ],
+      "field_notes": [
+        {
+          "key": "phone",
+          "note": "لازم يبدأ بـ 07"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "checkout": "collect",
+    "known": [
+      {
+        "key": "name",
+        "value": "ليان"
+      }
+    ],
+    "missing": [
+      "phone",
+      "area"
+    ],
+    "missing0_note": "لازم يبدأ بـ 07",
+    "missing1_label_en": "Area"
+  }
+}

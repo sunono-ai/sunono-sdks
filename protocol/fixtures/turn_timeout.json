@@ -1,0 +1,14 @@
+{
+  "description": "Server timeout fallback: a normal reply, action_data null.",
+  "response": {
+    "type": "done",
+    "reply": "عذراً، أخذ الرد وقت أطول من المتوقع. جرب تبعتلي رسالتك مرة ثانية. 🙏\nSorry, that took longer than expected — please send your message again.",
+    "session_id": "s1",
+    "action_data": null
+  },
+  "expect": {
+    "silent": false,
+    "products": 0,
+    "cart_present": false
+  }
+}

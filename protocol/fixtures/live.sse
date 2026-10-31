@@ -1,0 +1,15 @@
+event: ping
+data: {}
+
+event: message.new
+data: {"type": "message.new", "data": {"body_text": "أهلين من فريق المتجر", "ts": "2026-10-30T22:21:00+00:00", "msg_ref": "msg_2", "sent_by": "owner", "media_stored": {"kind": "image", "url": "/api/media/x.jpg"}}}
+
+event: conversation.paused
+data: {"type": "conversation.paused", "data": {"bot_paused_at": "2026-10-30T22:20:59+00:00"}}
+
+event: some.future.event
+data: {"type": "some.future.event", "data": {}}
+
+event: cart.updated
+data: {"type": "cart.updated", "data": {"cart": {"items": [{"product_id": "prod_a", "name_ar": "تمر", "qty": 4, "subtotal_fils": 32000}], "item_count": 1, "total_fils": 32000}}}
+

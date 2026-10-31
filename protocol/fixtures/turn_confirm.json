@@ -1,0 +1,33 @@
+{
+  "description": "Chat checkout read-back.",
+  "response": {
+    "reply": "راجع الطلب وقلّي تمام؟",
+    "session_id": "s1",
+    "action_data": {
+      "order_confirm": true,
+      "details": [
+        {
+          "key": "name",
+          "value": "ليان",
+          "label_ar": "الاسم"
+        },
+        {
+          "key": "phone",
+          "value": "0791112223",
+          "label_ar": "رقم التلفون"
+        }
+      ],
+      "order_total_text": "15.1 دينار",
+      "service_fee_text": "0.5 دينار",
+      "vat_text": null,
+      "field_notes": null
+    }
+  },
+  "expect": {
+    "checkout": "confirm",
+    "details": 2,
+    "total_text": "15.1 دينار",
+    "service_fee_text": "0.5 دينار",
+    "vat_text": null
+  }
+}

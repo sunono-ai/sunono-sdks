@@ -1,0 +1,48 @@
+{
+  "description": "Synced shop checkout: hand off to the host.",
+  "response": {
+    "reply": "تمام! كمّل الطلب من صفحة الدفع.",
+    "session_id": "s1",
+    "msg_ref": "msg_h1",
+    "action_data": {
+      "cart_summary": {
+        "items": [
+          {
+            "product_id": "prod_a",
+            "name_ar": "تمر مجهول",
+            "name_en": "Medjool Dates",
+            "qty": 2,
+            "price_fils": 8000,
+            "subtotal_fils": 16000,
+            "img_urls": [
+              "https://images.example.com/d.jpg"
+            ]
+          },
+          {
+            "product_id": "prod_b",
+            "name_ar": "تيشيرت",
+            "name_en": "T-shirt",
+            "qty": 1,
+            "price_fils": 8500,
+            "subtotal_fils": 8500,
+            "img_urls": [],
+            "variant_label": "L / كحلي",
+            "variant_label_en": "L / Navy"
+          }
+        ],
+        "item_count": 2,
+        "total_fils": 24500,
+        "remote": {
+          "store_code": "jo_ar"
+        }
+      },
+      "checkout_handoff": {
+        "url": "https://shop.example/jo_ar/checkout/"
+      }
+    }
+  },
+  "expect": {
+    "handoff_url": "https://shop.example/jo_ar/checkout/",
+    "checkout": null
+  }
+}

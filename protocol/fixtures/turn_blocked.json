@@ -1,0 +1,13 @@
+{
+  "description": "Blocked shopper.",
+  "response": {
+    "reply": "",
+    "session_id": "s1",
+    "blocked": true,
+    "action_data": {}
+  },
+  "expect": {
+    "silent": true,
+    "blocked": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "stream_photo.sse": {
+    "frames": 4,
+    "stages": [
+      "understand",
+      "brand_new_stage"
+    ],
+    "done_msg_ref": "msg_p1",
+    "done_reply": "هاي الصورة لواقي شمس"
+  },
+  "live.sse": {
+    "events": [
+      "ping",
+      "message.new",
+      "conversation.paused",
+      "some.future.event",
+      "cart.updated"
+    ],
+    "message_staff": true,
+    "cart_count": 4
+  }
+}

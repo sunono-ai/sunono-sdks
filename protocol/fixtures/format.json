@@ -1,0 +1,79 @@
+{
+  "description": "Money and text rules every SDK must match.",
+  "jod": [
+    [
+      12.5,
+      "ar",
+      "12.5 د.أ"
+    ],
+    [
+      12.5,
+      "en",
+      "12.5 JOD"
+    ],
+    [
+      6.849,
+      "en",
+      "6.85 JOD"
+    ],
+    [
+      6.845,
+      "en",
+      "6.85 JOD"
+    ],
+    [
+      2,
+      "en",
+      "2 JOD"
+    ],
+    [
+      1234.5,
+      "en",
+      "1,234.5 JOD"
+    ],
+    [
+      0.05,
+      "ar",
+      "0.05 د.أ"
+    ],
+    [
+      15.1,
+      "ar",
+      "15.1 د.أ"
+    ]
+  ],
+  "sanitize": [
+    [
+      "**مرحبا** يا\n# عنوان\n- بند",
+      "مرحبا يا\nعنوان\nبند"
+    ]
+  ],
+  "rtl": [
+    [
+      "مرحبا يا hello",
+      false,
+      true
+    ],
+    [
+      "hello مرحبا world",
+      true,
+      false
+    ],
+    [
+      "123 😀",
+      true,
+      true
+    ],
+    [
+      "123",
+      false,
+      false
+    ],
+    [
+      "مرحبا hello",
+      true,
+      false
+    ]
+  ],
+  "rtl_note": "[text, ui_is_rtl_fallback, expected_rtl]; a tie in letter counts is LTR"
+}

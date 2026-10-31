@@ -1,0 +1,11 @@
+data: {"type": "stage", "stage": "understand"}
+
+: comment line
+
+data: {"type": "stage", "stage": "brand_new_stage"}
+
+data: {"type": "future_event", "x": 1}
+
+data: {"type": "done", "reply": "هاي الصورة لواقي شمس", "session_id": "s1", "msg_ref": "msg_p1",
+data:  "action_data": {"products": [], "reply_lang": "ar"}}
+
