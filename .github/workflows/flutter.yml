@@ -18,6 +18,7 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
+      - run: git --no-pager diff
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
