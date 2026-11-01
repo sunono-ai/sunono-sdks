@@ -30,6 +30,7 @@ Protocol v1.1 (additive). Breaking changes first.
 - README: intents table, host-allowlisted `OpenUrlIntent` example, secure-storage example, "Data collected" table for App Store / Play, cart-sync guide.
 
 ### Fixed
+- Stopping the live connection (app pause, `reset()`) no longer leaks an uncaught async error into the host's crash reporter.
 
 - The cart binding follows the server (history, `/chat/cart`, relink); older responses never overwrite a newer cart.
 - Request timeouts (15 s; 90 s for a turn), SSE line and frame size caps, a 300-message bound, history merge beyond the cap.
