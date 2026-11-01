@@ -185,7 +185,14 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
         if (_c.cart != null && _c.cart!.count > 0)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-            child: CartBar(cart: _c.cart!, theme: theme, lang: lang, onTap: _c.busy ? null : _c.openCart),
+            child: CartBar(
+              cart: _c.cart!,
+              theme: theme,
+              // The line name and money follow the latest bot reply's language.
+              lang: msgs.reversed.where((m) => m.role == ChatRole.bot && m.replyLang != null).firstOrNull?.replyLang ??
+                  lang,
+              onTap: _c.busy ? null : _c.openCart,
+            ),
           ),
         _Composer(
           theme: theme,

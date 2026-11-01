@@ -299,6 +299,12 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('bar follows the latest reply language (Arabic UI, English reply)', (tester) async {
+      await turn(tester, 'ar', {...cartTurn, 'reply_lang': 'en'});
+      expect(find.text('Tea'), findsOneWidget);
+      await finish(tester);
+    });
+
     testWidgets('bar hides the total when stale', (tester) async {
       await turn(tester, 'en', {
         'reply_lang': 'en',

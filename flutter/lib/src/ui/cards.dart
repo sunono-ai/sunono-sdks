@@ -409,7 +409,7 @@ class HandoffButton extends StatelessWidget {
 }
 
 /// The cart pill above the composer: the newest line (thumbnail + name), «+N»
-/// for the other units, the total unless the sync withheld it. [onTap] null =
+/// for every other unit, the total unless the sync withheld it. [onTap] null =
 /// disabled (a turn is running).
 class CartBar extends StatelessWidget {
   const CartBar({super.key, required this.cart, required this.theme, required this.lang, required this.onTap});
@@ -423,7 +423,8 @@ class CartBar extends StatelessWidget {
     final t = SunonoCopy.of(lang);
     final last = cart.lines.isEmpty ? null : cart.lines.last;
     final name = last == null ? t.cart : last.name(lang);
-    final more = cart.count - (last?.qty ?? cart.count);
+    // Web CartCard: every unit but the featured one (a store-only cart has none).
+    final more = last == null ? cart.count : cart.count - 1;
     final thumb = Container(
       width: 32,
       height: 32,

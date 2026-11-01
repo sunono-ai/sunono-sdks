@@ -272,7 +272,25 @@ void main() {
       home: Scaffold(body: CartBar(cart: cart, theme: const SunonoTheme(), lang: 'en', onTap: () {})),
     ));
     expect(find.text('Tea'), findsOneWidget);
-    expect(find.text('+4'), findsOneWidget, reason: 'the line plus +N add up to the badge');
+    expect(find.text('+5'), findsOneWidget, reason: 'every unit but the featured one');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  Future<void> bar(WidgetTester tester, Cart cart) => tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: CartBar(cart: cart, theme: const SunonoTheme(), lang: 'en', onTap: () {})),
+      ));
+
+  testWidgets('a single line of qty 3 shows +2', (tester) async {
+    await bar(tester, const Cart(lines: [CartLine(productId: 'p', nameEn: 'Tea', qty: 3)]));
+    expect(find.text('Tea'), findsOneWidget);
+    expect(find.text('+2'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('store-side lines only: +count and no line name', (tester) async {
+    await bar(tester, const Cart(lines: [], extraLines: [ExtraLine(sku: 'X', qty: 2), ExtraLine(sku: 'Y', qty: 3)]));
+    expect(find.text('+5'), findsOneWidget);
+    expect(find.text('Cart'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }

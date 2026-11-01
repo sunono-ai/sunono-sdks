@@ -33,7 +33,7 @@ void main() {
         case OpenCartIntent(): router.push('/cart');
         case CheckoutIntent(): router.push('/checkout');
         case OpenUrlIntent(:final url): launchUrl(Uri.parse(url));
-        case OpenOrderIntent(:final storeOrderId): router.push('/orders/$storeOrderId');
+        case OpenOrderIntent(:final storeOrderId?): router.push('/orders/$storeOrderId');
         default: return false;          // intents added in later versions
       }
       return true;
