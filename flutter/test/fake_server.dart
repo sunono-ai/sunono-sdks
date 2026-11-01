@@ -84,12 +84,12 @@ class FakeServer {
         return _json(config);
       case '/chat':
         if (dropChat) throw http.ClientException('Connection reset by peer');
+        await beforeChatReply?.call();
         if (failChatOnceWith != null) {
           final s = failChatOnceWith!;
           failChatOnceWith = null;
           return _json(failChatBody, s);
         }
-        await beforeChatReply?.call();
         return _json(chatReply);
       case '/chat/history':
         final body = historyBody ??

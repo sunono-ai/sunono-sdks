@@ -86,13 +86,16 @@ class Session {
     return _token = res.token;
   }
 
-  /// Runs [call] with a token, re-initing once on an auth failure.
+  /// Runs [call] with a token, re-initing once on an auth failure. A call
+  /// that started before a [reset] is never replayed as the new shopper.
   Future<T> authed<T>(Future<T> Function(String token) call) async {
+    final gen = _gen;
     try {
       try {
         return await call(await token());
       } on SunonoHttpException catch (e) {
         if (!e.isAuth) rethrow;
+        if (gen != _gen) throw StateError('shopper was reset during the call');
         return await call(await token(force: true));
       }
     } on SunonoHttpException catch (e) {

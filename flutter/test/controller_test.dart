@@ -295,6 +295,38 @@ void main() {
       expect(c.busy, isFalse);
     });
 
+    test('a 401 that lands after reset never replays the old message as the new shopper', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final gate = Completer<void>();
+      server.beforeChatReply = () => gate.future;
+      server.failChatOnceWith = 401;
+      final sending = c.send('old shopper');
+      await server.until(() => server.count('/chat') == 1);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([sending, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.bodies['/chat']!.where((b) => b.contains('old shopper')), hasLength(1));
+      expect(c.messages, isEmpty);
+    });
+
+    test('a 401 upload that lands after reset is not re-sent as the new shopper', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      server.failUploadOnce = (401, 'unauthorized');
+      final uploading = c.attachPhoto(SunonoImage(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0, 0, 0])));
+      await server.until(() => server.count('/chat/upload') == 1);
+      final resetting = c.reset();
+      server.beforeUpload = null;
+      gate.complete();
+      await Future.wait([uploading, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.count('/chat/upload'), 1);
+    });
+
     test('concurrent first use mints exactly one shopper id', () async {
       final storage = MemoryStorage();
       final ctl = make(storage: storage, bridge: _Bridge());
