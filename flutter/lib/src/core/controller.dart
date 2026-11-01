@@ -943,7 +943,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       final History h;
-      final ticket = ++_cartReq, gen = _linkGen;
+      final ticket = ++_cartReq, link = _linkGen;
       try {
         h = await _session.authed(_api.history, gen: gen);
       } catch (_) {
@@ -971,7 +971,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
           _insertPill(p);
         }
         _syncPausePill(h.pausedAt);
-        _applyHistoryMeta(h, ticket, gen);
+        _applyHistoryMeta(h, ticket, link);
         _changed();
         return;
       }

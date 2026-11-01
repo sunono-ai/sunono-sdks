@@ -263,6 +263,29 @@ void main() {
     expect(c.messages.map((m) => m.text).toList(), ['hello', 'hi there']);
   });
 
+  test('recovery still polls history after the cart link was re-armed (not a reset)', () async {
+    make(recoveryChecks: const [Duration(milliseconds: 50)]);
+    await c.open();
+    // Bump the link counter well past the shopper generation (both start small).
+    for (var i = 0; i < 3; i++) {
+      await c.refreshCartBinding();
+    }
+    // Let open()'s own history load finish first, so only recovery can find the reply.
+    await server.until(() => server.count('/chat/history') >= 1);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    server.failChatOnceWith = 409;
+    server.failChatBody = {'error': 'turn_in_progress'};
+    server.historyRows = [
+      {'role': 'user', 'sender': 'user', 'text': 'hello', 'msg_ref': 'u1'},
+      {'role': 'bot', 'sender': 'bot', 'text': 'hi there', 'msg_ref': 'b1'},
+    ];
+    final polled = server.count('/chat/history');
+    await c.send('hello').timeout(const Duration(seconds: 5));
+    expect(server.count('/chat/history'), greaterThan(polled));
+    expect(c.messages.map((m) => m.text).toList(), ['hello', 'hi there']);
+    expect(c.messages.any((m) => m.state == MessageState.failed), isFalse);
+  });
+
   test('403 platform_disabled switches the chat to the disabled state', () async {
     make();
     await c.open();

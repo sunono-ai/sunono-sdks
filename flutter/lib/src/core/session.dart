@@ -123,7 +123,9 @@ class Session {
       } on SunonoHttpException catch (e) {
         if (!e.isAuth) rethrow;
         if (gen != _gen) throw StateError('shopper was reset during the call');
-        return await call(await token(force: true));
+        final t = await token(force: true);
+        if (gen != _gen) throw StateError('shopper was reset during the call');
+        return await call(t);
       }
     } on SunonoHttpException catch (e) {
       if (e.isPlatformDisabled) onPlatformDisabled?.call();
