@@ -165,6 +165,47 @@ void main() {
     expect(Cart.fromJson((live[4].json!['data'] as Map)['cart'])!.count, le['cart_count']);
   });
 
+  test('v1.1 additive fields', () {
+    var f = fixture('turn_relink.json');
+    expect(TurnResult.fromJson(f['response'] as Map<String, dynamic>).relink, isTrue);
+    expect(TurnResult.fromJson(fixture('turn_search.json')['response'] as Map<String, dynamic>).relink, isFalse);
+
+    f = fixture('turn_order_ids.json');
+    var e = f['expect'] as Map<String, dynamic>;
+    final ids = TurnResult.fromJson(f['response'] as Map<String, dynamic>).orderIds!;
+    expect(ids.publicId, e['public_id']);
+    expect(ids.number, e['number']);
+    expect(ids.storeOrderId, e['store_order_id']);
+    expect(ids.source, e['source']);
+    expect(TurnResult.fromJson(fixture('turn_placed.json')['response'] as Map<String, dynamic>).orderIds, isNull);
+
+    f = fixture('config_app.json');
+    for (final k in ['min_version', 'platform_disabled']) {
+      final c = f[k] as Map<String, dynamic>;
+      e = c['expect'] as Map<String, dynamic>;
+      final cfg = ShopConfig.fromJson(c['response'] as Map<String, dynamic>);
+      expect(cfg.enabled, e['enabled'], reason: k);
+      expect(cfg.minSdkVersion, e['min_sdk_version'], reason: k);
+      expect(cfg.disabledReason, e['disabled_reason'], reason: k);
+    }
+    expect(ShopConfig.fromJson(fixture('config.json')['response'] as Map<String, dynamic>).minSdkVersion, isNull);
+
+    f = fixture('cart_extra_lines.json');
+    e = f['expect'] as Map<String, dynamic>;
+    final cart = Cart.fromJson(f['response'])!;
+    expect(cart.extraLineCount, e['extra_line_count']);
+    expect(cart.count, e['count']);
+    expect(cart.totalFils, e['total_fils']);
+    final x0 = e['extra0'] as Map<String, dynamic>;
+    expect(cart.extraLines[0].sku, x0['sku']);
+    expect(cart.extraLines[0].qty, x0['qty']);
+    expect(cart.extraLines[0].rowTotalFils, x0['row_total_fils']);
+    expect(
+        Cart.fromJson(fixture('turn_add_synced.json')['response']['action_data']['cart_summary'])!.extraLineCount, 0);
+
+    expect((fixture('tap_request.json')['request'] as Map)['action'], 'add_to_cart');
+  });
+
   test('format rules', () {
     final f = fixture('format.json');
     for (final c in f['jod'] as List) {

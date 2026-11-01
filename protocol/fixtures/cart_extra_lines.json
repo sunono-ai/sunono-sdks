@@ -1,0 +1,42 @@
+{
+  "description": "Synced cart with lines the catalog does not know (remote.extra_lines). They count toward the badge.",
+  "response": {
+    "items": [
+      {
+        "product_id": "prod_a",
+        "name_ar": "تمر مجهول",
+        "name_en": "Medjool Dates",
+        "qty": 2,
+        "price_fils": 8000,
+        "subtotal_fils": 16000
+      }
+    ],
+    "item_count": 1,
+    "total_fils": 30000,
+    "remote": {
+      "store_code": "jo_ar",
+      "extra_lines": [
+        {
+          "sku": "SKU-X1",
+          "qty": 1,
+          "row_total_fils": 4000
+        },
+        {
+          "sku": "SKU-X2",
+          "qty": 3,
+          "row_total_fils": 10000
+        }
+      ]
+    }
+  },
+  "expect": {
+    "count": 6,
+    "extra_line_count": 2,
+    "extra0": {
+      "sku": "SKU-X1",
+      "qty": 1,
+      "row_total_fils": 4000
+    },
+    "total_fils": 30000
+  }
+}

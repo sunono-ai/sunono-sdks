@@ -1,0 +1,28 @@
+{
+  "description": "GET /widget/config?key=…&platform=ios|android — the app block, and a platform that is switched off.",
+  "min_version": {
+    "response": {
+      "enabled": true,
+      "header_title_en": "Shop Assistant",
+      "app": {
+        "min_sdk_version": "0.3.0"
+      }
+    },
+    "expect": {
+      "enabled": true,
+      "min_sdk_version": "0.3.0",
+      "disabled_reason": null
+    }
+  },
+  "platform_disabled": {
+    "response": {
+      "enabled": false,
+      "reason": "platform_disabled"
+    },
+    "expect": {
+      "enabled": false,
+      "min_sdk_version": null,
+      "disabled_reason": "platform_disabled"
+    }
+  }
+}

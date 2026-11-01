@@ -185,20 +185,33 @@ class CartLine {
   }
 }
 
+/// A synced-cart line the catalog doesn't know (`remote.extra_lines`, PROTOCOL §5.2).
+class ExtraLine {
+  const ExtraLine({this.sku, this.qty = 1, this.rowTotalFils});
+  final String? sku;
+  final int qty;
+  final int? rowTotalFils;
+}
+
 class Cart {
-  const Cart({required this.lines, this.distinctCount = 0, this.totalFils});
+  const Cart({required this.lines, this.distinctCount = 0, this.totalFils, this.extraLines = const []});
 
   /// `null` for an empty or missing cart.
   static Cart? fromJson(Object? raw) {
     if (raw is! Map) return null;
     final j = raw.cast<String, dynamic>();
     final lines = _maps(j['items']).map(CartLine.fromJson).toList();
-    if (lines.isEmpty && (_int(j['item_count']) ?? 0) == 0) return null;
+    final extra = [
+      for (final x in _maps(_map(j['remote'])['extra_lines']))
+        ExtraLine(sku: _str(x['sku']), qty: _int(x['qty']) ?? 1, rowTotalFils: _int(x['row_total_fils'])),
+    ];
+    if (lines.isEmpty && extra.isEmpty && (_int(j['item_count']) ?? 0) == 0) return null;
     final stale = j['stale'] == true;
     return Cart(
       lines: lines,
       distinctCount: _int(j['item_count']) ?? lines.length,
       totalFils: stale ? null : _int(j['total_fils']),
+      extraLines: extra,
     );
   }
 
@@ -208,8 +221,13 @@ class Cart {
   /// Null when the totals are withheld (a stale synced cart): show items only.
   final int? totalFils;
 
+  /// Storefront lines outside the catalog; they count toward [count].
+  final List<ExtraLine> extraLines;
+  int get extraLineCount => extraLines.length;
+
   /// What a shopper means by "how many things": sum of quantities.
-  int get count => lines.isEmpty ? distinctCount : lines.fold(0, (s, l) => s + l.qty);
+  int get count =>
+      (lines.isEmpty ? distinctCount : lines.fold(0, (s, l) => s + l.qty)) + extraLines.fold(0, (s, x) => s + x.qty);
 }
 
 class CheckoutField {
@@ -336,6 +354,17 @@ class CheckoutPlaced extends Checkout {
   final int? vatFils;
 }
 
+/// `action_data.order_ids` (PROTOCOL §4.1).
+class OrderIds {
+  const OrderIds({this.publicId, this.number, this.storeOrderId, this.source});
+  final String? publicId;
+  final String? number;
+  final String? storeOrderId;
+
+  /// `chat` or `storefront`.
+  final String? source;
+}
+
 /// The final payload of a turn: `/chat` JSON or the `done` frame (PROTOCOL §4.1).
 class TurnResult {
   const TurnResult({
@@ -352,12 +381,15 @@ class TurnResult {
     this.paused = false,
     this.blocked = false,
     this.typingHint,
+    this.relink = false,
+    this.orderIds,
   });
 
   factory TurnResult.fromJson(Map<String, dynamic> j) {
     final a = _map(j['action_data']);
     final cartRaw = a['cart_summary'] ?? a['cart'];
     final handoff = _str(_map(a['checkout_handoff'])['url']);
+    final ids = _map(a['order_ids']);
     return TurnResult(
       reply: _as<String>(j['reply']) ?? '',
       msgRef: _str(j['msg_ref']),
@@ -372,6 +404,15 @@ class TurnResult {
       paused: j['paused'] == true,
       blocked: j['blocked'] == true,
       typingHint: j['typing_hint'] is bool ? j['typing_hint'] as bool : null,
+      relink: _on(a['cart_relink']),
+      orderIds: ids.isEmpty
+          ? null
+          : OrderIds(
+              publicId: _str(ids['public_id']),
+              number: ids['number'] == null ? null : _str('${ids['number']}'),
+              storeOrderId: ids['store_order_id'] == null ? null : _str('${ids['store_order_id']}'),
+              source: _str(ids['source']),
+            ),
     );
   }
 
@@ -393,6 +434,10 @@ class TurnResult {
   final bool blocked;
   final bool? typingHint;
 
+  /// The storefront cart link was dropped: re-bind (PROTOCOL §8).
+  final bool relink;
+  final OrderIds? orderIds;
+
   /// Paused/blocked/silenced with nothing to say: render nothing, no retry.
   bool get silent => reply.trim().isEmpty;
 }
@@ -408,6 +453,8 @@ class ShopConfig {
     this.avatarUrl,
     this.defaultLanguage = 'ar',
     this.typingHint = true,
+    this.minSdkVersion,
+    this.disabledReason,
   });
 
   factory ShopConfig.fromJson(Map<String, dynamic> j) => ShopConfig(
@@ -419,6 +466,8 @@ class ShopConfig {
         avatarUrl: _isHttpUrl(_str(j['avatar_url'])) ? _str(j['avatar_url']) : null,
         defaultLanguage: _str(j['default_language']) == 'en' ? 'en' : 'ar',
         typingHint: j['typing_hint'] != false,
+        minSdkVersion: _str(_map(j['app'])['min_sdk_version']),
+        disabledReason: _str(j['reason']),
       );
 
   final bool enabled;
@@ -429,6 +478,12 @@ class ShopConfig {
   final String? avatarUrl;
   final String defaultLanguage;
   final bool typingHint;
+
+  /// Oldest SDK version the shop still supports (`app.min_sdk_version`).
+  final String? minSdkVersion;
+
+  /// Why `enabled` is false, e.g. `platform_disabled`.
+  final String? disabledReason;
 
   String? title(String lang) => pickLang(titleAr, titleEn, lang);
   String? welcome(String lang) => pickLang(welcomeAr, welcomeEn, lang);

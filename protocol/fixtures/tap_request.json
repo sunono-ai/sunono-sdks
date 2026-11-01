@@ -1,0 +1,12 @@
+{
+  "description": "Expected POST /shops/{shop}/chat body for an 'add to cart' card tap (structured action, PROTOCOL §4).",
+  "request": {
+    "message": "Add \"Medjool Dates\" to my cart",
+    "lang": "en",
+    "synthetic": true,
+    "action": "add_to_cart",
+    "action_ref": "prod_a",
+    "product_sku": "SKU-A1",
+    "client_message_id": "7b1d6f2e-3c4a-4b5d-8e6f-1a2b3c4d5e70"
+  }
+}
