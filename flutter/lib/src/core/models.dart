@@ -152,11 +152,13 @@ class ProductCard {
   /// when a discount applies.
   double? get struckPrice => preselectPriceJod != null ? preselectWasJod : (discountJod != null ? priceJod : null);
 
-  /// `round((1 - disc/orig) * 100)`, only when strictly between 0 and 100.
+  /// `round((1 - disc/orig) * 100)` of the list price vs [discountJod], only
+  /// when strictly between 0 and 100. A preselected variant's was→price gets
+  /// no percentage (as on the web).
   int? get salePct {
-    final was = struckPrice, now = shownPrice;
-    if (was == null || now == null || was <= 0) return null;
-    final x = ((1 - now / was) * 100).round();
+    final orig = priceJod, disc = discountJod;
+    if (preselectPriceJod != null || orig == null || disc == null || orig <= 0) return null;
+    final x = ((1 - disc / orig) * 100).round();
     return x > 0 && x < 100 ? x : null;
   }
 

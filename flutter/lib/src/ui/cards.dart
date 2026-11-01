@@ -42,36 +42,33 @@ class ProductCarousel extends StatelessWidget {
         textDirection: lang == 'en' ? TextDirection.ltr : TextDirection.rtl,
         child: MediaQuery.withClampedTextScaling(
           maxScaleFactor: 1.6,
-          child: Builder(builder: (context) {
-            // Image + padding are fixed; the text block grows with the font.
-            final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-            return SizedBox(
-              height: 232 + 140 * scale,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsetsDirectional.only(start: 4, end: 16, top: 4, bottom: 8),
-                itemCount: products.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (_, i) {
-                  final p = products[i];
-                  return ProductTile(
-                    product: p,
+          // Every card is as tall as the tallest one (the web's flex-stretch),
+          // so Add lines up along the bottom whatever the font scale.
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsetsDirectional.only(start: 4, end: 16, top: 4, bottom: 8),
+            child: IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                for (var i = 0; i < products.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  ProductTile(
+                    product: products[i],
                     theme: theme,
                     lang: lang,
                     uiLang: uiLang,
-                    onOpen: () => onOpen(p),
+                    onOpen: () => onOpen(products[i]),
                     onAdd: () {
-                      if (!busy) onAdd(p);
+                      if (!busy) onAdd(products[i]);
                     },
                     onDetails: () {
-                      if (!busy) onDetails(p);
+                      if (!busy) onDetails(products[i]);
                     },
-                    adding: addingRef == p.publicId,
-                  );
-                },
-              ),
-            );
-          }),
+                    adding: addingRef == products[i].publicId,
+                  ),
+                ],
+              ]),
+            ),
+          ),
         ),
       );
 }
@@ -135,7 +132,7 @@ class ProductTile extends StatelessWidget {
     final label = p.preselectPriceJod == null ? null : p.preselectLabel(lang);
     final stockBadge = !p.inStock
         ? (t.unavailable, theme.muted)
-        : p.lowStockQty != null
+        : (p.lowStockQty ?? 0) > 0
             ? (t.lowStock(p.lowStockQty!), theme.danger)
             : null;
 
@@ -163,16 +160,13 @@ class ProductTile extends StatelessWidget {
                     boundedNetworkImage(context, image, width: 164, fallback: _noImage)
                   else
                     _noImage(),
-                  if (stockBadge != null || (from && p.onSale))
+                  if (stockBadge != null)
                     PositionedDirectional(
                       top: 8,
                       start: 8,
-                      end: 8,
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        if (stockBadge != null) Flexible(child: _badge(stockBadge.$1, stockBadge.$2)),
-                        const Spacer(),
-                        if (from && p.onSale) Flexible(child: _badge(t.sale, theme.accent)),
-                      ]),
+                      end: 44, // clear of the details button
+                      child: Align(
+                          alignment: AlignmentDirectional.centerStart, child: _badge(stockBadge.$1, stockBadge.$2)),
                     ),
                   if (onDetails != null) _detailsButton(t.detailsOf(title)),
                 ]),
@@ -204,11 +198,13 @@ class ProductTile extends StatelessWidget {
                       if (pct != null)
                         _ltr(Text('-$pct%',
                             maxLines: 1, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.danger))),
+                      if (from && p.onSale) _badge(t.sale, theme.accent),
                     ]),
                     const SizedBox(height: 6),
                     _AddButton(
                         theme: theme,
                         label: p.inStock ? t.addToCart : t.unavailable,
+                        semanticLabel: '${p.inStock ? t.addToCart : t.unavailable}: $title',
                         onTap: p.inStock ? onAdd : null,
                         spinning: adding),
                   ]),
@@ -272,9 +268,9 @@ class ProductTile extends StatelessWidget {
             style: theme.text(size: 11, weight: FontWeight.w600, color: Colors.white)),
       );
 
-  /// ⓘ on the image's bottom-end corner (the badges own the top).
+  /// ⓘ on the image's top-end corner, as on the web.
   Widget _detailsButton(String label) => PositionedDirectional(
-        bottom: 0,
+        top: 0,
         end: 0,
         child: Semantics(
           container: true,
@@ -302,14 +298,22 @@ class ProductTile extends StatelessWidget {
 }
 
 class _AddButton extends StatelessWidget {
-  const _AddButton({required this.theme, required this.label, this.onTap, this.spinning = false});
+  const _AddButton(
+      {required this.theme, required this.label, required this.semanticLabel, this.onTap, this.spinning = false});
   final SunonoTheme theme;
   final String label;
+  final String semanticLabel;
   final VoidCallback? onTap;
   final bool spinning;
 
   @override
-  Widget build(BuildContext context) => Opacity(
+  Widget build(BuildContext context) => Semantics(
+      container: true,
+      button: true,
+      enabled: onTap != null,
+      label: semanticLabel,
+      excludeSemantics: true,
+      child: Opacity(
         opacity: onTap == null ? 0.5 : 1,
         child: Material(
           color: Colors.transparent,
@@ -341,7 +345,7 @@ class _AddButton extends StatelessWidget {
             ),
           ),
         ),
-      );
+      ));
 }
 
 /// A rounded outline chip (show more, retry, starter prompts).

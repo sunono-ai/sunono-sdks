@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
-import 'package:sunono/src/ui/cards.dart' show ProductCarousel;
+import 'package:sunono/src/ui/cards.dart' show ProductCarousel, ProductTile;
 import 'package:sunono/sunono.dart';
 
 import 'fake_server.dart';
@@ -250,7 +253,7 @@ void main() {
       expect(find.text('كيلو / حبوب'), findsOneWidget);
       expect(find.text('9 د.أ'), findsOneWidget);
       expect(tester.widget<Text>(find.text('12 د.أ')).style!.decoration, TextDecoration.lineThrough);
-      expect(find.text('-25%'), findsOneWidget);
+      expect(find.textContaining('%'), findsNothing, reason: 'no -X% for a variant was -> price (web parity)');
       await finish(tester);
     });
 
@@ -342,6 +345,135 @@ void main() {
       expect(lastBody(), containsPair('lang', 'en'), reason: 'lang is the UI hint');
       await finish(tester);
     });
+  });
+
+  group('layout', () {
+    Size sizeOf(WidgetTester tester, Finder f) => tester.getSize(f);
+
+    Finder tiles() => find.byType(ProductTile);
+
+    testWidgets('a plain card is compact at 1x and Add sits at its bottom', (tester) async {
+      await showCards(tester, 'en', [product('a', sku: 'A', en: 'Plain')]);
+      expect(sizeOf(tester, tiles()).height, lessThan(260));
+      final tileBottom = tester.getBottomLeft(tiles()).dy;
+      final addBottom = tester.getBottomLeft(find.text('Add to cart')).dy;
+      expect(tileBottom - addBottom, lessThan(20), reason: 'no dead space under the button');
+      await finish(tester);
+    });
+
+    for (final scale in [1.0, 2.0]) {
+      testWidgets('every card in a mixed carousel is as tall as the tallest, Add bottom-aligned (x$scale)',
+          (tester) async {
+        await showCards(
+            tester,
+            'en',
+            [
+              product('a', sku: 'A', en: 'Plain'),
+              product('b', sku: 'B', en: 'Rich long title that wraps onto two lines here', more: {
+                'low_stock_qty': 3,
+                'price_from': 8,
+                'discount_jod': 8,
+                'on_sale': true,
+                'metadata': {'a': 'Ethiopia', 'b': 'light', 'c': 'organic'},
+              }),
+              product('c', sku: 'C', en: 'Variant', more: {
+                'preselect_line': {'price_fils': 9000, 'was_fils': 12000, 'label_en': '1kg / beans'},
+              }),
+            ],
+            textScale: scale);
+        expect(tester.takeException(), isNull);
+        final heights = [
+          for (final e in tiles().evaluate()) (e.renderObject! as RenderBox).size.height.toStringAsFixed(1)
+        ];
+        expect(heights, hasLength(3));
+        expect(heights.toSet(), hasLength(1), reason: 'stretched to the tallest: $heights');
+        final bottoms = [
+          for (final e in find.text('Add to cart').evaluate())
+            (e.renderObject! as RenderBox).localToGlobal(Offset.zero).dy.toStringAsFixed(1)
+        ];
+        expect(bottoms.toSet(), hasLength(1), reason: 'Add buttons share a baseline: $bottoms');
+        if (scale == 1.0) expect(double.parse(heights.first), lessThan(340));
+        await finish(tester);
+      });
+    }
+
+    // The default test font (Ahem) is a full em wide per glyph, which would
+    // ellipsize any badge; measure with the real Roboto from the SDK instead.
+    Future<void> realFont() async {
+      final dir = '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts';
+      final loader = FontLoader('Roboto');
+      for (final f in ['Regular', 'Medium', 'Bold']) {
+        loader.addFont(Future.value(ByteData.sublistView(File('$dir/Roboto-$f.ttf').readAsBytesSync())));
+      }
+      await loader.load();
+    }
+
+    for (final withSale in [false, true]) {
+      for (final lang in ['en', 'ar']) {
+        testWidgets('low stock label is unclipped at 1x ($lang, sale: $withSale)', (tester) async {
+          await tester.runAsync(realFont);
+          await showCards(tester, lang, [
+            product('p', ar: 'قهوة', en: 'Coffee', more: {
+              'low_stock_qty': 3,
+              if (withSale) ...{'price_from': 8, 'discount_jod': 8, 'on_sale': true},
+            }),
+          ]);
+          final label = lang == 'en' ? 'Only 3 left!' : 'باقي 3 بس!';
+          final box = tester.renderObject<RenderParagraph>(find.text(label));
+          expect(box.didExceedMaxLines, isFalse);
+          // The badge fits the image strip left of the ⓘ button.
+          final badge = tester.getRect(find.ancestor(of: find.text(label), matching: find.byType(Container)).first);
+          final image = tester.getRect(find.byType(AspectRatio).first);
+          expect(badge.width, lessThanOrEqualTo(image.width - 8 - 44 + 0.5));
+          expect(withSale ? find.text(lang == 'en' ? 'Sale' : 'عرض') : find.text('\u0000'),
+              withSale ? findsOneWidget : findsNothing);
+          await finish(tester);
+          server = FakeServer();
+        });
+      }
+    }
+
+    testWidgets('Sale sits inline with the From price; details button is top-end', (tester) async {
+      await showCards(tester, 'en', [
+        product('p', en: 'Coffee', more: {'price_from': 8, 'on_sale': true}),
+      ]);
+      final sale = tester.getCenter(find.text('Sale'));
+      final from = tester.getCenter(find.text('From 8 JOD'));
+      expect((sale.dy - from.dy).abs(), lessThan(8));
+      final image = tester.getRect(find.byType(AspectRatio).first);
+      final info = tester.getCenter(find.byIcon(Icons.info_outline_rounded));
+      expect(info.dy, lessThan(image.top + 44));
+      expect(info.dx, greaterThan(image.center.dx), reason: 'LTR: end is the right');
+      await finish(tester);
+    });
+  });
+
+  group('semantics', () {
+    testWidgets('Add button announces "<label>: <title>"', (tester) async {
+      final sem = tester.ensureSemantics();
+      await showCards(tester, 'en', [product('p', en: 'Coffee')]);
+      expect(find.bySemanticsLabel('Add to cart: Coffee'), findsOneWidget);
+      await finish(tester);
+      sem.dispose();
+    });
+
+    testWidgets('Arabic out-of-stock button announces «مش متوفر: <title>»', (tester) async {
+      final sem = tester.ensureSemantics();
+      await showCards(tester, 'ar', [
+        product('p', ar: 'قهوة', more: {'in_stock': false})
+      ]);
+      expect(find.bySemanticsLabel('مش متوفر: قهوة'), findsOneWidget);
+      await finish(tester);
+      sem.dispose();
+    });
+  });
+
+  testWidgets('low_stock_qty 0 shows no low-stock badge', (tester) async {
+    await showCards(tester, 'en', [
+      product('p', en: 'Coffee', more: {'low_stock_qty': 0})
+    ]);
+    expect(find.textContaining('left'), findsNothing);
+    await finish(tester);
   });
 
   testWidgets('200% text on a 320px phone: badges + chips + preselect + sale lay out without overflow', (tester) async {
