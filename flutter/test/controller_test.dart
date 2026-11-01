@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -325,6 +326,21 @@ void main() {
       await Future.wait([uploading, resetting]);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(server.count('/chat/upload'), 1);
+    });
+
+    test('a disposed controller never opens or resumes', () async {
+      final ctl = make();
+      ctl.dispose();
+      await ctl.open();
+      ctl.resume();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(server.requests, isEmpty);
+      expect(ctl.status, ChatStatus.idle);
+    });
+
+    test('sdkVersion is the pubspec version', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(sdkVersion, RegExp(r'^version:\s*(\S+)', multiLine: true).firstMatch(pubspec)![1]);
     });
 
     test('concurrent first use mints exactly one shopper id', () async {

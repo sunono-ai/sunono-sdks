@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sunono/sunono.dart';
 import 'package:sunono/src/core/live.dart';
@@ -79,6 +80,22 @@ void main() {
     expect((c.photo.value as PhotoFailed).code, 'offline');
     expect(c.busy, isFalse);
     gate.complete();
+  });
+
+  test('a /chat/stream connect that times out still drains the late response', () async {
+    final released = Completer<void>();
+    final api = SunonoApi(
+      shopKey: 'pk_test',
+      apiBase: 'https://api.test/api',
+      turnTimeout: const Duration(milliseconds: 20),
+      clientFactory: () => MockClient.streaming((req, body) async {
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        final late = StreamController<List<int>>(onCancel: released.complete);
+        return http.StreamedResponse(late.stream, 200);
+      }),
+    );
+    await expectLater(api.chatStream('t', 'x', lang: 'ar').drain<void>(), throwsA(isA<TimeoutException>()));
+    await released.future.timeout(const Duration(seconds: 2));
   });
 
   test('parseSse: lone CR breaks lines, CRLF (even split across chunks) breaks once', () async {

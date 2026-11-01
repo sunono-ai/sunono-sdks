@@ -176,7 +176,8 @@ class ProductTile extends StatelessWidget {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                  // No bottom padding: the Add button's 48 dp target supplies it.
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(title,
                         textDirection: _dir(title),
@@ -203,7 +204,6 @@ class ProductTile extends StatelessWidget {
                             maxLines: 1, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.danger))),
                       if (from && p.onSale) _badge(t.sale, theme.accent),
                     ]),
-                    const SizedBox(height: 6),
                     _AddButton(
                         theme: theme,
                         label: p.inStock ? t.addToCart : t.unavailable,
@@ -309,41 +309,51 @@ class _AddButton extends StatelessWidget {
   final VoidCallback? onTap;
   final bool spinning;
 
+  /// 32 dp to see, 48 dp to touch: the 8 dp above and below are the gap to
+  /// the price and the card's bottom padding.
   @override
   Widget build(BuildContext context) => Semantics(
       container: true,
       button: true,
       enabled: onTap != null,
       label: semanticLabel,
+      onTap: onTap,
       excludeSemantics: true,
-      child: Opacity(
-        opacity: onTap == null ? 0.5 : 1,
-        child: Material(
-          color: Colors.transparent,
-          child: Ink(
-            height: 32,
-            decoration: BoxDecoration(gradient: theme.brandGradient, borderRadius: BorderRadius.circular(16)),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: onTap,
-              child: Center(
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (spinning)
-                    // Reduce motion: a still glyph instead of a spinner.
-                    MediaQuery.disableAnimationsOf(context)
-                        ? Icon(Icons.hourglass_top_rounded, size: 15, color: theme.onPrimary)
-                        : SizedBox.square(
-                            dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: theme.onPrimary))
-                  else
-                    Icon(Icons.add_shopping_cart_rounded, size: 15, color: theme.onPrimary),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.text(size: 12, weight: FontWeight.w600, color: theme.onPrimary)),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Opacity(
+            opacity: onTap == null ? 0.5 : 1,
+            child: Material(
+              color: Colors.transparent,
+              child: Ink(
+                height: 32,
+                decoration: BoxDecoration(gradient: theme.brandGradient, borderRadius: BorderRadius.circular(16)),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: onTap,
+                  child: Center(
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (spinning)
+                        // Reduce motion: a still glyph instead of a spinner.
+                        MediaQuery.disableAnimationsOf(context)
+                            ? Icon(Icons.hourglass_top_rounded, size: 15, color: theme.onPrimary)
+                            : SizedBox.square(
+                                dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: theme.onPrimary))
+                      else
+                        Icon(Icons.add_shopping_cart_rounded, size: 15, color: theme.onPrimary),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.text(size: 12, weight: FontWeight.w600, color: theme.onPrimary)),
+                      ),
+                    ]),
                   ),
-                ]),
+                ),
               ),
             ),
           ),

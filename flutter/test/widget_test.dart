@@ -139,6 +139,40 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('200% text at 320 dp: the paused subtitle and the sheet close button fit the header', (tester) async {
+    tester.view.physicalSize = const Size(320 * 3, 640 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    server.historyBody = {'messages': [], 'bot_paused_at': DateTime.now().toUtc().toIso8601String()};
+    await tester.pumpWidget(app(SunonoChatView(controller: make('en'), onClose: () {}), textScale: 2));
+    await settle(tester);
+    expect(find.text('Store team is with you'), findsOneWidget);
+    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  });
+
+  testWidgets('screen readers: Send says when it is disabled; links in a bubble are links', (tester) async {
+    final semantics = tester.ensureSemantics();
+    server.chatReply = {'reply': 'See https://shop.example/p for more', 'action_data': <String, dynamic>{}};
+    await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+    await settle(tester);
+    final send = find.bySemanticsLabel('Send');
+    // isSemantics replaces it from Flutter 3.40; the floor is 3.27.
+    // ignore: deprecated_member_use
+    expect(tester.getSemantics(send), containsSemantics(isButton: true, hasEnabledState: true, isEnabled: false));
+    await tester.enterText(find.byType(TextField), 'link please');
+    await tester.pump();
+    // ignore: deprecated_member_use
+    expect(tester.getSemantics(send), containsSemantics(isButton: true, hasEnabledState: true, isEnabled: true));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await settle(tester);
+    // ignore: deprecated_member_use
+    expect(tester.getSemantics(find.bySemanticsLabel('https://shop.example/p')), containsSemantics(isLink: true));
+    semantics.dispose();
+    await finish(tester);
+  });
+
   testWidgets('large text (200%) on a small phone lays out without overflow', (tester) async {
     tester.view.physicalSize = const Size(320 * 3, 640 * 3);
     tester.view.devicePixelRatio = 3;

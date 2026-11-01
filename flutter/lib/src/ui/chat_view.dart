@@ -115,7 +115,8 @@ class _SunonoChatViewState extends State<SunonoChatView> {
   void _onChange() {
     if (!_sentInitial && widget.initialMessage != null && _c.status == ChatStatus.ready && !_c.busy) {
       _sentInitial = true;
-      _c.send(widget.initialMessage!, productId: widget.productId, productSku: widget.productSku);
+      // The host's message, not the composer's: it never takes or drops the shopper's photo.
+      _c.send(widget.initialMessage!, productId: widget.productId, productSku: widget.productSku, withPhoto: false);
     }
     if (mounted) setState(() {});
   }
@@ -308,7 +309,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
         child: Row(children: [
           if (avatarUrl == null)
             PresenceOrb(theme: theme, size: 40, thinking: thinking)
@@ -333,7 +334,10 @@ class _Header extends StatelessWidget {
               Row(children: [
                 Container(width: 7, height: 7, decoration: BoxDecoration(color: theme.success, shape: BoxShape.circle)),
                 const SizedBox(width: 5),
-                Text(subtitle, style: theme.text(size: 12, color: theme.muted)),
+                Flexible(
+                  child: Text(subtitle,
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.text(size: 12, color: theme.muted)),
+                ),
               ]),
             ]),
           ),
@@ -641,11 +645,15 @@ class _BubbleText extends StatelessWidget {
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.baseline,
         baseline: TextBaseline.alphabetic,
-        child: GestureDetector(
-          onTap: () => onLink(url),
-          child: Text(url,
-              textDirection: TextDirection.ltr,
-              style: style.copyWith(decoration: TextDecoration.underline, color: color ?? theme.primaryText)),
+        child: Semantics(
+          container: true, // its own node: only the URL is the link, not the whole bubble
+          link: true,
+          child: GestureDetector(
+            onTap: () => onLink(url),
+            child: Text(url,
+                textDirection: TextDirection.ltr,
+                style: style.copyWith(decoration: TextDecoration.underline, color: color ?? theme.primaryText)),
+          ),
         ),
       ));
       last = m.start + url.length;
@@ -756,10 +764,12 @@ class _Composer extends StatelessWidget {
           if (photo is! PhotoIdle && image != null) ...[
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: Stack(clipBehavior: Clip.none, children: [
-                  ClipRRect(
+              // The 6 dp margin is inside the Stack so the remove button's
+              // 48 dp target (which overhangs the preview) is hit-testable.
+              child: Stack(children: [
+                Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.memory(
                       image!.bytes,
@@ -771,8 +781,11 @@ class _Composer extends StatelessWidget {
                           SizedBox(width: 64, height: 64, child: Icon(Icons.broken_image_outlined, color: theme.muted)),
                     ),
                   ),
-                  if (photo case PhotoUploading(:final progress))
-                    Positioned.fill(
+                ),
+                if (photo case PhotoUploading(:final progress))
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
                         child: ColoredBox(
@@ -792,19 +805,40 @@ class _Composer extends StatelessWidget {
                         ),
                       ),
                     ),
-                  PositionedDirectional(
-                    top: -8,
-                    end: -8,
-                    child: IconButton.filledTonal(
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 14,
-                      tooltip: copy.removePhoto,
-                      onPressed: onRemovePhoto,
-                      icon: const Icon(Icons.close_rounded),
+                  ),
+                PositionedDirectional(
+                  top: 0,
+                  end: 0,
+                  // 48 dp to touch, the same small circle to see.
+                  child: Semantics(
+                    button: true,
+                    label: copy.removePhoto,
+                    onTap: onRemovePhoto,
+                    excludeSemantics: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onRemovePhoto,
+                      child: SizedBox.square(
+                        dimension: 48,
+                        child: Align(
+                          alignment: AlignmentDirectional.topEnd,
+                          child: Padding(
+                            padding: const EdgeInsetsDirectional.only(top: 2, end: 2),
+                            child: IconButton.filledTonal(
+                              visualDensity: VisualDensity.compact,
+                              style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                              iconSize: 14,
+                              tooltip: copy.removePhoto,
+                              onPressed: onRemovePhoto,
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ]),
-              ),
+                ),
+              ]),
             ),
             if (photo case PhotoFailed(:final code, :final retryable))
               Padding(
@@ -861,6 +895,7 @@ class _Composer extends StatelessWidget {
             ),
             Semantics(
               button: true,
+              enabled: canSend,
               label: copy.send,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 150),

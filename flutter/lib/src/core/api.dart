@@ -45,7 +45,11 @@ const _proofKeys = [
 
 const _localHosts = {'localhost', '127.0.0.1', '10.0.2.2'};
 
-/// Thin HTTP client for protocol v1. Stateless: tokens are passed in.
+/// Low-level HTTP client for protocol v1. Stateless: tokens are passed in.
+///
+/// Hosts normally only construct one, for a headless `SunonoChatController`
+/// (`Sunono.init` makes its own). The methods are low level: their return
+/// types are internal and may change in any 0.x release.
 class SunonoApi {
   /// [apiBase] must be https (plain http only for localhost, 127.0.0.1 and
   /// the Android emulator's 10.0.2.2), else [ArgumentError]. Every request
@@ -175,7 +179,12 @@ class SunonoApi {
     final req = http.Request('POST', Uri.parse('$_shop/chat/stream'))
       ..headers.addAll(_headers(token: token, json: true))
       ..body = jsonEncode(_turnBody(text, lang, synthetic, productId, productSku, tap, imageRef, clientMessageId));
-    final res = await _client.send(req).timeout(turnTimeout);
+    final sending = _client.send(req);
+    final res = await sending.timeout(turnTimeout, onTimeout: () {
+      // A late response would hold its socket open unread: drain it.
+      sending.then((r) => r.stream.listen(null).cancel()).ignore();
+      throw TimeoutException('no response from /chat/stream', turnTimeout);
+    });
     if (res.statusCode >= 400) {
       await _decode(await http.Response.fromStream(res).timeout(requestTimeout));
     }

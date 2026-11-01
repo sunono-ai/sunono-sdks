@@ -13,7 +13,7 @@ import 'session.dart';
 import 'sse.dart';
 
 /// The server refuses larger photos (`413 image_too_large`).
-const _maxPhotoBytes = 10 * 1024 * 1024;
+const _maxPhotoBytes = 5 * 1024 * 1024;
 
 /// The server signs an `image_ref` for about an hour; refresh before that.
 const _imageRefMaxAge = Duration(minutes: 55);
@@ -386,6 +386,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Load config and history, bind the cart, go live. Safe to call again.
   Future<void> open() async {
+    if (_disposed) return;
     if (_status == ChatStatus.ready || _status == ChatStatus.loading) {
       resume();
       return;
@@ -456,6 +457,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// App came back: config if stale, history first, then live again; re-check
   /// the cart link. An idle chat with a view attached opens.
   void resume() {
+    if (_disposed) return;
     final at = _configAt;
     final stale = at == null || _clock().difference(at) > _configMaxAge;
     if (_status == ChatStatus.disabled) {
@@ -650,13 +652,18 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// A typed message carries the attached photo once it is [PhotoReady]; while
   /// the photo is uploading or failed nothing is sent (the caption would lose
-  /// its picture). A tap never takes the photo.
+  /// its picture). A tap never takes the photo, nor does [withPhoto] false
+  /// (the photo stays in the composer).
   Future<void> send(String text,
-      {bool synthetic = false, String? productId, String? productSku, ({String action, String ref})? tap}) async {
+      {bool synthetic = false,
+      String? productId,
+      String? productSku,
+      ({String action, String ref})? tap,
+      bool withPhoto = true}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty || _busy || _status != ChatStatus.ready || updateRequired) return;
     final state = _photo.value;
-    final typed = !synthetic && tap == null;
+    final typed = !synthetic && tap == null && withPhoto;
     if (typed && (state is PhotoUploading || (state is PhotoFailed && state.retryable))) return;
     final image = typed && state is PhotoReady ? _photoImage : null;
     final ref = typed && state is PhotoReady ? state.ref : null;

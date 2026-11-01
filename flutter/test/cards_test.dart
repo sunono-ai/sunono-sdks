@@ -105,6 +105,25 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('Add: a 48 dp target around the 32 dp button, and a tap action for screen readers', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await showCards(tester, 'en', [product('prod_a', sku: 'SKU-A1', en: 'Medjool Dates')]);
+      final label = find.text('Add to cart');
+      final visual = tester.getRect(find.ancestor(of: label, matching: find.byType(InkWell)).first);
+      expect(visual.height, 32);
+      await tester.tapAt(visual.bottomCenter + const Offset(0, 6)); // just below the visible pill
+      await settle(tester);
+      expect(lastBody()['action'], 'add_to_cart', reason: 'the margin adds, it does not open the product');
+      expect(intents.whereType<OpenProductIntent>(), isEmpty);
+      final node = tester.getSemantics(find.bySemanticsLabel(RegExp('^Add to cart: ')));
+      expect(node.rect.height, greaterThanOrEqualTo(48));
+      // isSemantics replaces it from Flutter 3.40; the floor is 3.27.
+      // ignore: deprecated_member_use
+      expect(node, containsSemantics(isButton: true, hasTapAction: true));
+      semantics.dispose();
+      await finish(tester);
+    });
+
     testWidgets('Arabic: Add and the details button send the phrase plus the structured tap', (tester) async {
       await showCards(tester, 'ar', [product('prod_a', sku: 'SKU-A1', ar: 'قهوة غوجي')]);
       await tester.tap(find.text('أضف للسلة'));

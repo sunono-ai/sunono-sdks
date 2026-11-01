@@ -120,12 +120,12 @@ void main() {
       expect(server.count('/chat/upload'), 0);
     });
 
-    test('over 10 MB is image_too_large without uploading; exactly 10 MB goes through', () async {
+    test('over 5 MB is image_too_large without uploading; exactly 5 MB goes through', () async {
       await c.open();
-      await c.attachPhoto(SunonoImage(_jpeg(10 * 1024 * 1024)));
+      await c.attachPhoto(SunonoImage(_jpeg(5 * 1024 * 1024)));
       expect((c.photo.value as PhotoFailed).code, 'image_too_large');
       expect(server.count('/chat/upload'), 0);
-      await c.attachPhoto(SunonoImage(_jpeg(10 * 1024 * 1024 - 4)));
+      await c.attachPhoto(SunonoImage(_jpeg(5 * 1024 * 1024 - 4)));
       expect(c.photo.value, isA<PhotoReady>());
     });
 
@@ -497,6 +497,51 @@ void main() {
       c.suspend(); // the live connection outlives the view
     });
 
+    testWidgets('initialMessage never takes the photo: a ready one stays, the text goes alone', (tester) async {
+      await tester.runAsync(() async {
+        await c.open();
+        await c.attachPhoto(SunonoImage(_jpeg()));
+      });
+      await tester.pumpWidget(app(SunonoChatView(controller: c, initialMessage: 'hi there')));
+      await settle(tester);
+      expect(server.bodies['/chat']!.single, contains('hi there'));
+      expect(server.count('/chat/stream'), 0);
+      expect(c.photo.value, isA<PhotoReady>());
+      await tester.pumpWidget(const SizedBox());
+      c.suspend();
+    });
+
+    testWidgets('initialMessage goes out while a photo is still uploading', (tester) async {
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      await tester.runAsync(c.open);
+      unawaited(c.attachPhoto(SunonoImage(_jpeg())));
+      await tester.pumpWidget(app(SunonoChatView(controller: c, initialMessage: 'hi there')));
+      await settle(tester);
+      expect(server.bodies['/chat']!.single, contains('hi there'));
+      expect(c.photo.value, isA<PhotoUploading>());
+      gate.complete();
+      await settle(tester);
+      expect(c.photo.value, isA<PhotoReady>());
+      await tester.pumpWidget(const SizedBox());
+      c.suspend();
+    });
+
+    testWidgets('remove-photo has a 48 dp target around its small button', (tester) async {
+      await pump(tester, lang: 'en');
+      await tester.tap(find.byTooltip('Attach a photo'));
+      await settle(tester);
+      expect(c.photo.value, isA<PhotoReady>());
+      final button = find.byTooltip('Remove photo');
+      final visual = tester.getRect(button);
+      expect(visual.height, lessThanOrEqualTo(40), reason: 'the visible button stays small');
+      await tester.tapAt(visual.bottomCenter + const Offset(0, 8)); // below the visible circle
+      await settle(tester);
+      expect(c.photo.value, isA<PhotoIdle>());
+      await tester.pumpWidget(const SizedBox());
+      c.suspend();
+    });
+
     testWidgets('English copy, remove button aborts, 320 px at 200% lays out', (tester) async {
       tester.view.physicalSize = const Size(320 * 3, 640 * 3);
       tester.view.devicePixelRatio = 3;
@@ -527,7 +572,7 @@ void main() {
         lang: 'en',
       );
       await tester.pumpWidget(
-          app(SunonoChatView(controller: c, pickImage: () async => SunonoImage(_jpeg(10 * 1024 * 1024 + 1)))));
+          app(SunonoChatView(controller: c, pickImage: () async => SunonoImage(_jpeg(5 * 1024 * 1024 + 1)))));
       await settle(tester);
       await tester.tap(find.byTooltip('Attach a photo'));
       await settle(tester);

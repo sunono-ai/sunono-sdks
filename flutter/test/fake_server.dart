@@ -114,7 +114,7 @@ class FakeServer {
           failUploadOnce = null;
           return _json({'error': code}, status);
         }
-        return _json({'image_ref': 'img_ref_${count('/chat/upload')}', 'url': 'https://cdn.test/p.jpg'});
+        return _json({'image_ref': 'img_ref_${count('/chat/upload')}'});
       case '/chat/stream':
         if (failStreamTimes > 0) {
           failStreamTimes--;
