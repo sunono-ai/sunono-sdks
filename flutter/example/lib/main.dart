@@ -22,8 +22,12 @@ void main() {
           debugPrint('open cart');
         case CheckoutIntent():
           debugPrint('open native checkout');
+        case OpenOrderIntent(:final number):
+          debugPrint('open order $number');
         case OpenUrlIntent(:final url):
           debugPrint('open $url');
+        default:
+          return false;
       }
       return true;
     },

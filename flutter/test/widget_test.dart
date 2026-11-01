@@ -134,7 +134,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
     await settle(tester);
-    await tester.tap(find.text('Complete your order'));
+    await tester.tap(find.text('Complete order on the site'));
     expect((intents.single as CheckoutIntent).url, 'https://shop.example/checkout/');
     await finish(tester);
   });
@@ -177,7 +177,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
     await settle(tester);
-    expect(find.text('كمّل الطلب'), findsOneWidget);
+    expect(find.text('كمّل الطلب بالموقع'), findsOneWidget);
     await finish(tester);
   });
 }

@@ -408,62 +408,75 @@ class HandoffButton extends StatelessWidget {
       );
 }
 
-/// The cart pill above the composer.
+/// The cart pill above the composer: the newest line (thumbnail + name), «+N»
+/// for the other units, the total unless the sync withheld it. [onTap] null =
+/// disabled (a turn is running).
 class CartBar extends StatelessWidget {
   const CartBar({super.key, required this.cart, required this.theme, required this.lang, required this.onTap});
   final Cart cart;
   final SunonoTheme theme;
   final String lang;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = SunonoCopy.of(lang);
+    final last = cart.lines.isEmpty ? null : cart.lines.last;
+    final name = last == null ? t.cart : last.name(lang);
+    final more = cart.count - (last?.qty ?? cart.count);
+    final thumb = Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(color: theme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
+      clipBehavior: Clip.antiAlias,
+      child: last?.imageUrl == null
+          ? Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primary)
+          : boundedNetworkImage(context, last!.imageUrl!,
+              width: 32, fallback: () => Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primary)),
+    );
     return Semantics(
       button: true,
-      child: Material(
-        color: theme.surface,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
+      enabled: onTap != null,
+      child: Opacity(
+        opacity: onTap == null ? 0.6 : 1,
+        child: Material(
+          color: theme.surface,
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: theme.primary.withValues(alpha: 0.15)),
-            ),
-            child: Row(children: [
-              Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(children: [
-                    TextSpan(text: t.cart, style: theme.text(size: 13, weight: FontWeight.w700)),
-                    // The two numbers add up to the badge (cart.count).
-                    if (cart.count > cart.extraQty)
-                      TextSpan(
-                          text: '  · ${t.items(cart.count - cart.extraQty)}',
-                          style: theme.text(size: 13, color: theme.muted)),
-                    if (cart.extraQty > 0)
-                      TextSpan(
-                          text: '  ${t.otherStoreItems(cart.extraQty)}',
-                          style: theme.text(size: 12, color: theme.muted)),
-                  ]),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: theme.primary.withValues(alpha: 0.15)),
               ),
-              if (cart.totalFils != null)
-                Flexible(
-                  child: Text(formatFils(cart.totalFils, lang),
-                      textAlign: TextAlign.end,
-                      style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primary)),
+              child: Row(children: [
+                thumb,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.text(size: 13, weight: FontWeight.w700)),
                 ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded,
-                  size: 18, color: theme.muted, textDirection: Directionality.of(context)),
-            ]),
+                if (more > 0) ...[
+                  const SizedBox(width: 8),
+                  _ltr(Text('+$more', style: theme.text(size: 12, weight: FontWeight.w700, color: theme.muted))),
+                ],
+                if (cart.totalFils != null) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(formatFils(cart.totalFils, lang),
+                        textAlign: TextAlign.end,
+                        style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primary)),
+                  ),
+                ],
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded,
+                    size: 18, color: theme.muted, textDirection: Directionality.of(context)),
+              ]),
+            ),
           ),
         ),
       ),
@@ -489,8 +502,9 @@ class CheckoutCardView extends StatelessWidget {
     switch (checkout) {
       case CheckoutCollect(:final known, :final missing):
         title = t.collectTitle;
+        // Known: the value alone (the shopper just said it); missing: what's left.
         for (final f in known) {
-          rows.add(_row(f.label(contentLang), f.value ?? '', note: f.note, done: true));
+          rows.add(_known(f.value ?? ''));
         }
         for (final f in missing) {
           rows.add(_row(f.label(contentLang), t.pending, note: f.note, pending: true));
@@ -505,7 +519,7 @@ class CheckoutCardView extends StatelessWidget {
         ):
         title = amend ? t.amendTitle : t.confirmTitle;
         for (final d in details) {
-          rows.add(_row(d.label(contentLang), d.value ?? '', note: d.note));
+          rows.add(_row(d.label(contentLang), d.value ?? '', note: amend ? d.note : null));
         }
         if (savingsText != null) rows.add(_row(t.savings, savingsText, accent: true));
         if (totalText != null) {
@@ -532,6 +546,8 @@ class CheckoutCardView extends StatelessWidget {
         if ((p.vatFils ?? 0) > 0) rows.add(_small(t.vatIncluded(formatFils(p.vatFils, contentLang))));
     }
     final placed = checkout is CheckoutPlaced;
+    final c = checkout;
+    final amending = c is CheckoutReview && c.amend;
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(14),
@@ -543,8 +559,14 @@ class CheckoutCardView extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Icon(placed ? Icons.check_circle_rounded : Icons.receipt_long_rounded,
-              size: 18, color: placed ? theme.success : theme.primary),
+          Icon(
+              placed
+                  ? Icons.check_circle_rounded
+                  : amending
+                      ? Icons.edit_outlined
+                      : Icons.receipt_long_rounded,
+              size: 18,
+              color: placed ? theme.success : theme.primary),
           const SizedBox(width: 8),
           Expanded(child: Text(title, style: theme.text(size: 14, weight: FontWeight.w700))),
         ]),
@@ -554,15 +576,23 @@ class CheckoutCardView extends StatelessWidget {
     );
   }
 
-  Widget _row(String label, String value,
-          {String? note, bool done = false, bool pending = false, bool accent = false}) =>
-      Padding(
+  Widget _known(String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.check_rounded, size: 15, color: theme.success),
+          const SizedBox(width: 6),
+          Expanded(child: Text(value, style: theme.text(size: 13, weight: FontWeight.w600))),
+        ]),
+      );
+
+  Widget _row(String label, String value, {String? note, bool pending = false, bool accent = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (done) Icon(Icons.check_rounded, size: 15, color: theme.success),
-            if (pending) Icon(Icons.radio_button_unchecked_rounded, size: 14, color: theme.muted),
-            if (done || pending) const SizedBox(width: 6),
+            if (pending) ...[
+              Icon(Icons.radio_button_unchecked_rounded, size: 14, color: theme.muted),
+              const SizedBox(width: 6),
+            ],
             Expanded(child: Text(label, style: theme.text(size: 13, color: theme.muted))),
             const SizedBox(width: 12),
             Flexible(

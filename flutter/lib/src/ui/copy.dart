@@ -51,9 +51,9 @@ class SunonoCopy {
 
   // Cart + checkout
   String get cart => _t('السلة', 'Cart');
-  String items(int n) => _ar ? '$n ${n == 1 ? 'قطعة' : 'قطع'}' : '$n ${n == 1 ? 'item' : 'items'}';
-  String otherStoreItems(int n) => _t('+$n قطع من المتجر', '+$n other store items');
-  String get completeOrder => _t('كمّل الطلب', 'Complete your order');
+  String completeOrder(bool native) =>
+      native ? _t('كمّل الطلب', 'Complete your order') : _t('كمّل الطلب بالموقع', 'Complete order on the site');
+  String get orderDetails => _t('تفاصيل الطلب', 'Order details');
   String get collectTitle => _t('بيانات التوصيل', 'Delivery details');
   String get confirmTitle => _t('تأكيد الطلب', 'Confirm your order');
   String get amendTitle => _t('شو حاب تغيّر؟', "What'd you like to change?");

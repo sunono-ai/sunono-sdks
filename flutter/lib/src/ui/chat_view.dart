@@ -177,6 +177,7 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
                 theme: theme,
                 lang: lang,
                 isLast: index == msgs.length - 1,
+                onClose: widget.onClose,
               );
             },
           ),
@@ -184,7 +185,7 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
         if (_c.cart != null && _c.cart!.count > 0)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-            child: CartBar(cart: _c.cart!, theme: theme, lang: lang, onTap: _c.openCart),
+            child: CartBar(cart: _c.cart!, theme: theme, lang: lang, onTap: _c.busy ? null : _c.openCart),
           ),
         _Composer(
           theme: theme,
@@ -276,6 +277,7 @@ class _MessageItem extends StatefulWidget {
     required this.isLast,
     this.timed = true,
     this.footer,
+    this.onClose,
   });
 
   final ChatMessage message;
@@ -291,6 +293,9 @@ class _MessageItem extends StatefulWidget {
 
   /// Extra content under the bubble (the starter chips).
   final Widget? footer;
+
+  /// Closes the sheet after the host takes over checkout.
+  final VoidCallback? onClose;
 
   @override
   State<_MessageItem> createState() => _MessageItemState();
@@ -489,13 +494,29 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
         ));
       }
       if (m.checkout != null) {
-        children
-            .add(CheckoutCardView(checkout: m.checkout!, theme: theme, lang: widget.lang, contentLang: contentLang));
+        children.add(
+            CheckoutCardView(checkout: m.checkout!, theme: theme, lang: widget.lang, contentLang: m.replyLang ?? 'ar'));
+      }
+      if (m.orderIds != null) {
+        children.add(Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: SunonoChip(
+              theme: theme,
+              label: t.orderDetails,
+              icon: Icons.receipt_long_rounded,
+              onTap: c.busy ? null : () => c.openOrder(m.orderIds!)),
+        ));
       }
       if (m.handoffUrl != null) {
         children.add(Padding(
           padding: const EdgeInsets.only(top: 10),
-          child: HandoffButton(theme: theme, label: t.completeOrder, onTap: () => c.checkout(m.handoffUrl)),
+          child: HandoffButton(
+            theme: theme,
+            label: t.completeOrder(c.nativeCheckout),
+            onTap: () {
+              if (c.checkout(m.handoffUrl)) widget.onClose?.call();
+            },
+          ),
         ));
       }
       if (footer != null) children.add(footer);

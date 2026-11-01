@@ -26,12 +26,15 @@ void main() {
     appOrigin: 'https://your-store.example',
     locale: 'ar',                       // follow your app: Sunono.setLocale('en')
     storage: MySecureStorage(),         // required: persists the anonymous shopper (see below)
+    nativeCheckout: true,               // CheckoutIntent opens your own checkout screen
     onIntent: (intent) {
       switch (intent) {
         case OpenProductIntent(:final sku): router.push('/products/$sku');
         case OpenCartIntent(): router.push('/cart');
         case CheckoutIntent(): router.push('/checkout');
         case OpenUrlIntent(:final url): launchUrl(Uri.parse(url));
+        case OpenOrderIntent(:final storeOrderId): router.push('/orders/$storeOrderId');
+        default: return false;          // intents added in later versions
       }
       return true;
     },
@@ -85,7 +88,7 @@ If your shop uses Sunono's Magento cart sync, the bot fills the shopper's real s
 2. The proof's `origin` must equal your `appOrigin`, and the shop's cart-sync storefront origins must list it.
 3. Call `Sunono.refreshCartBinding()` after login, logout or a cart merge.
 
-Checkout then hands off to your app (`CheckoutIntent`) instead of the chat.
+Checkout then hands off to your app (`CheckoutIntent`) instead of the chat. Set `nativeCheckout: true` when your handler opens a native checkout screen; the button then reads «كمّل الطلب» / "Complete your order" instead of «…بالموقع» / "…on the site".
 
 ## Photos
 

@@ -38,6 +38,7 @@ class ChatMessage {
     this.hasMore = false,
     this.checkout,
     this.handoffUrl,
+    this.orderIds,
     this.msgRef,
     this.clientRef,
     DateTime? ts,
@@ -56,6 +57,9 @@ class ChatMessage {
   bool hasMore;
   Checkout? checkout;
   String? handoffUrl;
+
+  /// Ids of the order this reply is about (placed, or its status).
+  OrderIds? orderIds;
   String? msgRef;
 
   /// The staff composer's `client_ref` from a live `message.new` (live dedupe).
@@ -96,6 +100,7 @@ class SunonoChatController extends ChangeNotifier {
     required SunonoStorage storage,
     String lang = 'ar',
     this.cartBridge,
+    this.nativeCheckout = false,
     this.onIntent,
     this.starterPrompts,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
@@ -117,6 +122,10 @@ class SunonoChatController extends ChangeNotifier {
   late final Session _session;
   late final LiveConnection _live;
   final SunonoCartBridge? cartBridge;
+
+  /// The host finishes checkout in its own screen (`CheckoutIntent`): the
+  /// handoff button says so. False = the web checkout.
+  final bool nativeCheckout;
 
   /// Returns true when the host handled the intent.
   bool Function(SunonoIntent intent)? onIntent;
@@ -556,6 +565,7 @@ class SunonoChatController extends ChangeNotifier {
       ..hasMore = r.hasMore
       ..checkout = r.checkout
       ..handoffUrl = r.handoffUrl
+      ..orderIds = r.orderIds
       ..msgRef = r.msgRef
       ..replyLang = r.replyLang
       ..ts = DateTime.now()
@@ -821,12 +831,34 @@ class SunonoChatController extends ChangeNotifier {
     if (!_hand(intent)) _emit(ErrorEvent(UnhandledIntent(intent)));
   }
 
-  void openCart() => _handOrReport(const OpenCartIntent());
+  /// View the cart: the host's cart screen while it shares the shopper's
+  /// storefront cart, otherwise (or when the host declines) ask the assistant.
+  Future<void> openCart() async {
+    if (_bound && _hand(const OpenCartIntent())) return;
+    await send(cartPhrase(_lang), synthetic: true);
+  }
 
-  void checkout(String? url) {
+  /// Order details: the host's order screen; a declined chat order asks the
+  /// assistant, a declined storefront order is reported.
+  Future<void> openOrder(OrderIds ids) async {
+    final intent =
+        OpenOrderIntent(number: ids.number, storeOrderId: ids.storeOrderId, publicId: ids.publicId, source: ids.source);
+    if (_hand(intent)) return;
+    if (ids.source == 'chat') {
+      await send(orderStatusPhrase(ids.number, _lang), synthetic: true);
+    } else {
+      _emit(ErrorEvent(UnhandledIntent(intent)));
+    }
+  }
+
+  /// Whether the host handled it (the sheet may close).
+  bool checkout(String? url) {
     _emit(const AnalyticsEvent('assistant_checkout_tapped'));
-    _handOrReport(CheckoutIntent(url: url));
+    final intent = CheckoutIntent(url: url);
+    final handled = _hand(intent);
+    if (!handled) _emit(ErrorEvent(UnhandledIntent(intent)));
     _unbind(); // the order completes on the storefront and rotates its cart
+    return handled;
   }
 
   void openUrl(String url) {

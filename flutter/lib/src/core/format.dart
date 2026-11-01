@@ -71,6 +71,12 @@ String addToCartPhrase(String title, String lang) => lang == 'ar' ? 'ضيف "$ti
 String detailsPhrase(String title, String lang) =>
     lang == 'ar' ? 'احكيلي أكثر عن "$title"' : 'Tell me more about "$title"';
 
+String cartPhrase(String lang) => lang == 'en' ? "What's in my cart?" : 'شو يلي بالسلة؟';
+
+String orderStatusPhrase(String? number, String lang) => lang == 'en'
+    ? (number == null ? 'Where is my order?' : 'Where is my order $number?')
+    : (number == null ? 'وين صار طلبي؟' : 'وين صار طلبي $number؟');
+
 String showMorePhrase(String lang) => lang == 'en' ? 'Show me more' : 'ورجيني كمان';
 
 /// «09:05»: local time, 24 h, Latin digits in every language (no `intl`).

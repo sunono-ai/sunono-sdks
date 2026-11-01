@@ -22,6 +22,7 @@ export 'src/core/models.dart'
         CheckoutReview,
         CheckoutPlaced,
         CheckoutField,
+        OrderIds,
         ShopConfig;
 export 'src/sunono.dart';
 export 'src/ui/chat_view.dart' show SunonoChatView;

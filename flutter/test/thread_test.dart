@@ -333,14 +333,13 @@ void main() {
   });
 
   group('intents', () {
-    test('an unhandled OpenUrl / cart / checkout intent surfaces UnhandledIntent', () async {
+    test('an unhandled OpenUrl / checkout intent surfaces UnhandledIntent', () async {
       make('ar', onIntent: (_) => false);
       c.openUrl('https://shop.example/p');
-      c.openCart();
       c.checkout('https://shop.example/checkout');
       await Future<void>.delayed(Duration.zero);
       final errs = events.whereType<ErrorEvent>().map((e) => e.error).whereType<UnhandledIntent>().toList();
-      expect(errs.map((e) => e.intent.runtimeType).toList(), [OpenUrlIntent, OpenCartIntent, CheckoutIntent]);
+      expect(errs.map((e) => e.intent.runtimeType).toList(), [OpenUrlIntent, CheckoutIntent]);
     });
 
     test('a handled intent is silent; an unsafe URL never reaches the host', () async {

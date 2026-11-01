@@ -23,6 +23,9 @@ abstract final class Sunono {
   /// - [storage]: persists the anonymous shopper id (use secure storage).
   ///   Required: without a persistent one every cold start is a new shopper.
   /// - [cartBridge]: Magento cart sync proofs, if your shop uses it.
+  /// - [nativeCheckout]: true when [onIntent] opens your own checkout screen
+  ///   for [CheckoutIntent]; the handoff button then reads «كمّل الطلب» /
+  ///   "Complete your order" instead of «…بالموقع» / "…on the site".
   /// - [pickImage]: enables photo messages.
   /// - [starterPrompts]: replaces the empty-thread starter chips per language,
   ///   e.g. `{'ar': ['شو في جديد؟'], 'en': ["What's new?"]}`; `[]` shows none.
@@ -34,6 +37,7 @@ abstract final class Sunono {
     String locale = 'ar',
     required SunonoStorage storage,
     SunonoCartBridge? cartBridge,
+    bool nativeCheckout = false,
     Future<SunonoImage?> Function()? pickImage,
     bool Function(SunonoIntent intent)? onIntent,
     Map<String, List<String>>? starterPrompts,
@@ -53,6 +57,7 @@ abstract final class Sunono {
       storage: storage,
       lang: locale,
       cartBridge: cartBridge,
+      nativeCheckout: nativeCheckout,
       onIntent: onIntent,
       starterPrompts: starterPrompts,
     );

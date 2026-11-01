@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:sunono/sunono.dart';
 import 'package:sunono/src/ui/cards.dart';
-import 'package:sunono/src/ui/copy.dart';
 
 import 'fake_server.dart';
 
@@ -251,7 +250,7 @@ void main() {
     expect(cartEvents().single.fromSync, isFalse);
   });
 
-  test('extra store lines count toward the badge and show on the cart bar', () async {
+  test('extra store lines count toward the badge', () async {
     final cart = Cart.fromJson(_cart(2, extra: {
       'extra_lines': [
         {'sku': 'X1', 'qty': 1},
@@ -261,23 +260,19 @@ void main() {
     expect(cart.count, 6);
     expect(cart.extraLineCount, 2);
     expect(cart.extraQty, 4);
-    expect(SunonoCopy.of('en').otherStoreItems(2), '+2 other store items');
-    expect(SunonoCopy.of('ar').otherStoreItems(2), '+2 قطع من المتجر');
   });
 
-  testWidgets('the cart bar splits the badge into own items and other store items', (tester) async {
+  testWidgets('the cart bar shows the newest line and the other units as +N', (tester) async {
     final cart = Cart(
-      lines: const [CartLine(productId: 'p', qty: 2)],
+      lines: const [CartLine(productId: 'p', nameEn: 'Tea', qty: 2)],
       extraLines: const [ExtraLine(sku: 'X1', qty: 1), ExtraLine(sku: 'X2', qty: 3)],
     );
     expect(cart.count, 6);
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: CartBar(cart: cart, theme: const SunonoTheme(), lang: 'en', onTap: () {})),
     ));
-    expect(find.textContaining('2 items'), findsOneWidget);
-    expect(find.textContaining('+4 other store items'), findsOneWidget);
-    expect(find.textContaining('6 items'), findsNothing,
-        reason: 'the two numbers add up to the badge, no double count');
+    expect(find.text('Tea'), findsOneWidget);
+    expect(find.text('+4'), findsOneWidget, reason: 'the line plus +N add up to the badge');
     await tester.pumpWidget(const SizedBox());
   });
 }

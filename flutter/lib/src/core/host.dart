@@ -41,7 +41,10 @@ class SunonoImage {
 }
 
 /// Navigation the assistant hands back to the host app.
-sealed class SunonoIntent {
+///
+/// Not sealed: new intents can be added in a minor release, so a host's
+/// `switch` should end with `default: return false;`.
+abstract class SunonoIntent {
   const SunonoIntent();
 }
 
@@ -70,8 +73,21 @@ class OpenUrlIntent extends SunonoIntent {
   final String url;
 }
 
-/// Things the host may want to react to.
-sealed class SunonoEvent {
+/// Open the host's screen for an order the assistant placed or reported on.
+/// Every field is optional; route by [storeOrderId] or [number] for a
+/// storefront order. [source] is `chat` (placed in the assistant) or
+/// `storefront`. Return false for a `chat` order and the assistant answers
+/// with the order's status instead.
+class OpenOrderIntent extends SunonoIntent {
+  const OpenOrderIntent({this.number, this.storeOrderId, this.publicId, this.source});
+  final String? number;
+  final String? storeOrderId;
+  final String? publicId;
+  final String? source;
+}
+
+/// Things the host may want to react to. Not sealed: end a `switch` with a default.
+abstract class SunonoEvent {
   const SunonoEvent();
 }
 
@@ -103,7 +119,7 @@ class ErrorEvent extends SunonoEvent {
 }
 
 /// Reported through [ErrorEvent] when an intent has no handler and the SDK has
-/// no fallback of its own (open URL, open cart, checkout).
+/// no fallback of its own (open URL, checkout, a storefront order).
 class UnhandledIntent implements Exception {
   const UnhandledIntent(this.intent);
   final SunonoIntent intent;
