@@ -50,16 +50,20 @@ class Session {
     // one for this process too, so chat never waits on a broken keychain.
     final clean = await (_clearing ?? Future.value(true));
     String? id;
+    var readFailed = false;
     if (clean) {
       try {
         id = await _storage.read(_key).timeout(storageTimeout);
       } catch (e, s) {
+        readFailed = true;
         onStorageError?.call(e, s);
       }
     }
     if (id == null || !_uuid.hasMatch(id)) {
       id = uuidV4();
-      await _save(id);
+      // A failed read may be transient (a keychain before first unlock): never
+      // overwrite the stored shopper with this process-only id.
+      if (!readFailed) await _save(id);
     }
     if (gen == _gen) _userId = id;
     return id;

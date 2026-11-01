@@ -345,6 +345,20 @@ void main() {
             anyElement(anyOf(contains('keychain'), contains('TimeoutException'))));
       }, timeout: const Timeout(Duration(seconds: 30)));
     }
+
+    test('a failed read never overwrites the stored shopper (it may be transient)', () async {
+      const stored = '11111111-1111-4111-8111-111111111111';
+      final storage = _FlakyStorage();
+      await storage.write('sunono.user_id.pk_test', stored);
+      storage.failUserIdRead = true;
+      c.dispose();
+      c = make(storage: storage);
+      await c.open();
+      await c.send('hi').timeout(const Duration(seconds: 15));
+      expect(c.userId, isNot(stored));
+      storage.failUserIdRead = false;
+      expect(await storage.read('sunono.user_id.pk_test'), stored);
+    });
   });
 
   group('reset forgets the device', () {
