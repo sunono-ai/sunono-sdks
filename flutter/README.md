@@ -132,7 +132,7 @@ Checkout then hands off to your app (`CheckoutIntent`) instead of the chat. Set 
 
 Pass `pickImage` to `Sunono.init` to show the photo button. Return a JPEG resized to at most 1600 px (e.g. `image_picker` with `maxWidth: 1600, imageQuality: 85`). Add the camera and photo-library permission strings to your app.
 
-The photo uploads as soon as it is picked, with a progress ring on the preview; JPEG, PNG and WebP up to 10 MB are accepted. Errors (too large, unreadable, refused, photos unavailable, offline) show under the preview with a Retry where it can help, and a caption is required to send. Headless: `controller.attachPhoto(image)`, `controller.photo` (`PhotoIdle | PhotoUploading | PhotoReady | PhotoFailed`), `retryPhoto()`, `removePhoto()`; `send(text)` carries a ready photo.
+The photo uploads as soon as it is picked, with a progress ring on the preview; JPEG, PNG and WebP up to 5 MB are accepted. Errors (too large, unreadable, refused, photos unavailable, offline) show under the preview with a Retry where it can help, and a caption is required to send. Headless: `controller.attachPhoto(image)`, `controller.photo` (`PhotoIdle | PhotoUploading | PhotoReady | PhotoFailed`), `retryPhoto()`, `removePhoto()`; `send(text)` carries a ready photo.
 
 ## Data collected and privacy
 
@@ -143,10 +143,10 @@ Use this table for your App Store privacy label and Google Play Data Safety form
 | Anonymous user ID | Always (stored in your `SunonoStorage`) | Keeps the shopper's chat and cart between launches |
 | Messages | Always | Answering the shopper |
 | Photos | Only when the shopper attaches one (`pickImage`) | Finding similar products |
-| Name, phone, address, email | Only for shops that run checkout inside the chat | Placing and delivering the order |
+| Name, phone, address, email | Only for shops that run checkout or order tracking in the chat | Placing, delivering and tracking the order |
 | Purchase history | Orders placed through the assistant | Order tracking, reordering |
 
-This data is processed by Sunono and its AI subprocessors (Google Gemini, OpenAI / OpenRouter). It is linked to the anonymous ID, not to an account of yours, unless the shopper types identifying details into the chat. The SDK collects no advertising ID and no device identifiers, and does no tracking across apps.
+This data is processed by Sunono and its subprocessors: AI model providers, message-safety checking, SMS for one-time codes (when the shop enables it) and cloud storage for photos. See [Sunono's privacy policy](https://dashboard.sunono.ai/privacy-policy) for the current list. It is linked to the anonymous ID, not to an account of yours, unless the shopper types identifying details into the chat. The SDK collects no advertising ID and no device identifiers, and does no tracking across apps.
 
 **Deletion.** `Sunono.reset()` unlinks this device from the shopper's data (logout); it does **not** delete it. A shopper who wants their data deleted asks the shop or Sunono support (support@sunono.ai).
 

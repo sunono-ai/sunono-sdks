@@ -4,6 +4,7 @@ Protocol v1.1 (additive). Breaking changes first.
 
 ### Breaking
 
+- `Sunono.init(locale:)` defaults to `null` (was `'ar'`): the chat follows the shop's `default_language` until the host sets one. `SunonoChatController(lang:)` is `String?` to match.
 - `Sunono.init(storage:)` is **required**. Pass a `SunonoStorage` over secure storage; `MemoryStorage` starts a new shopper on every launch and is for tests and demos.
 - `SunonoIntent` and `SunonoEvent` are no longer `sealed` (now `abstract`), so new intents and events (like `OpenOrderIntent`) never break host code again. A `switch` **expression** over either type without a `_` / default arm no longer compiles; `switch` **statements** still compile. End every host switch with `default: return false;` (intents) or `default: break;` (events).
 - `CartChangedEvent` gained `fromSync`: `true` when the storefront cart itself changed. The event now also fires for every change of lines, totals and store-side items, not only the count.
@@ -17,12 +18,13 @@ Protocol v1.1 (additive). Breaking changes first.
 
 ### Added
 
-- `OpenOrderIntent` (with an "Order details" chip on placed and tracked orders), `ProductCard.sku`, `Sunono.open(productSku:)`.
+- `OpenOrderIntent` (with an "Order details" chip on placed and tracked orders), `Sunono.open(productSku:)`.
 - `Sunono.cartCount` and `Sunono.unread` listenables for tab badges; `Sunono.refreshCart()`.
+- `controller.send(text, withPhoto: false)` sends text without taking the composer's photo (used by `Sunono.open(initialMessage:)`).
 - Theme fallback from the dashboard (brand color, light/dark scheme, avatar) when no `theme` is passed; `SunonoTheme.fromConfig`. Brand colors are contrast-checked for text and buttons.
 - Remote kill switch (`enabled: false`, `platform_disabled`) and a minimum SDK version from the shop config, each with an "unavailable" / "update the app" state.
 - `Sunono.reset()` also asks the server to detach this device (`/chat/forget`), in the background and retried on the next open. It unlinks the device from the shopper's data; it does not delete it.
-- Photos upload as soon as they are picked, with progress, inline errors and Retry (JPEG, PNG, WebP up to 10 MB).
+- Photos upload as soon as they are picked, with progress, inline errors and Retry (JPEG, PNG, WebP up to 5 MB).
 - Product cards match the web widget: sale and price-from badges, `-X%`, preselected variant, option chips, stock states, a details button.
 - Thread parity: welcome and starter chips, timestamps, pause/resume pills in the right place, de-duplicated live messages, safe link handling, an image lightbox.
 - Checkout and order cards match the web widget; structured taps (add to cart, product detail) are sent to the server; `client_message_id` makes sends idempotent (a retry never double-places).
@@ -31,10 +33,13 @@ Protocol v1.1 (additive). Breaking changes first.
 
 ### Fixed
 - Stopping the live connection (app pause, `reset()`) no longer leaks an uncaught async error into the host's crash reporter.
-
 - The cart binding follows the server (history, `/chat/cart`, relink); older responses never overwrite a newer cart.
 - Request timeouts (15 s; 90 s for a turn), SSE line and frame size caps, a 300-message bound, history merge beyond the cap.
 - A reset clears local state at once and never reconnects the previous shopper, even if secure-storage deletion fails or hangs.
+- A turn or upload in flight across `reset()` is never re-sent as the new shopper (after a 401), and a reset during loading or while disabled re-opens the chat.
+- Secure storage that fails or hangs no longer stops the chat: the shopper id is kept in memory for the session and an `ErrorEvent` is reported.
+- `Sunono.open(initialMessage:)` never takes, or waits on, a photo in the composer.
+- Accessibility: Send reports when it is disabled, links in bubbles are links, the remove-photo and Add buttons have 48 dp targets, and the header subtitle ellipsizes at large text.
 - Product and chat images are decoded at display size.
 
 ### Notes

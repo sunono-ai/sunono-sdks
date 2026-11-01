@@ -51,7 +51,7 @@ Response:
 
 - **The anonymous shopper.** `user_id` is the durable anonymous shopper: cart, orders and history hang off it. The client generates it once (a UUID v4), persists it, and always sends the same one. A missing or invalid id is minted by the server; use the returned value.
 - **Token lifetime.** The token lives **15 minutes**. Clients cache it and re-call `/shops/init` with the same `user_id` when a call answers `401`, or `422` without a JSON `error` field (an invalid JWT). Upload's `422 {"error":"image_blocked"}` is not an auth failure.
-- **Rate limit.** Init is limited to 5 per minute per IP, so never call it per message.
+- **Rate limit.** Init is limited to 30 per minute per IP, so never call it per message.
 - `session_id` is informational. The server derives the conversation thread itself from activity (6 hours idle starts a new, empty thread).
 - **Logout / "clear chat".** Delete the stored `user_id`; the next init mints a new shopper.
 
@@ -356,9 +356,9 @@ Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on cha
 
 ## 9. Photos — `POST /shops/{shop}/chat/upload` (Bearer, multipart `image`; 10 per minute)
 
-- **Success:** `200 {"image_ref":"…","url":"…"}`. Then send a message with `image_ref`; a caption is required.
+- **Success:** `200 {"image_ref":"…"}`. Then send a message with `image_ref`; a caption is required.
 - **Errors:**
-  - `413 image_too_large`
+  - `413 image_too_large`: over 5 MB
   - `400 invalid_image`
   - `422 image_blocked`: moderation refused it
   - `503 image_unavailable` (v1.1): moderation is unavailable right now. Nothing was stored; offer a retry.
