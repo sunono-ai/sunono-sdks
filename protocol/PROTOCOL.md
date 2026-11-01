@@ -80,6 +80,7 @@ Presentation only. It is cacheable (ETag, max-age 60).
 - `{"enabled": false}` is the **kill switch**. Show no chat entry point, and show a neutral "unavailable" state if the chat is already open.
 - `{"enabled": false, "reason": "platform_disabled"}` (v1.1) means the shop switched chat off for this platform only. Treat it exactly like the kill switch. Turns sent anyway answer `403 {"error":"platform_disabled"}` (§4).
 - `app.min_sdk_version` (v1.1, optional, `x.y.z`) is the oldest SDK version the shop still supports. An SDK older than it should degrade gracefully (for example, show an "update the app" notice) rather than fail.
+- `welcome_message_<lang>` is shown only in that language. There is no cross-language fallback: when it is missing, the SDK uses its own default welcome.
 - `typing_hint: false` means AI replies are currently off. Show no typing indicator after a send; staff may still answer over the live stream.
 - Native SDKs may ignore `primary_color`/`color_scheme`/`launcher_*` in favor of the host theme.
 

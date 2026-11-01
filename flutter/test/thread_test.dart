@@ -95,6 +95,11 @@ void main() {
       expect(isSafeLink('https://shöp.example/p'), isFalse);
       expect(isSafeLink('https://пример.example/'), isFalse);
       expect(isSafeLink('https://'), isFalse);
+      expect(isSafeLink('https://shop.example@evil.com/p'), isFalse, reason: 'userinfo');
+      expect(isSafeLink('https://user:pw@shop.example/'), isFalse);
+      expect(isSafeLink('https://shop.example/p@x'), isTrue, reason: '@ in the path is fine');
+      expect(trimLinkTail('https://shop.example/p${String.fromCharCode(0x200F)}'), 'https://shop.example/p');
+      expect(trimLinkTail('https://shop.example/p.${String.fromCharCode(0x200F)}؟'), 'https://shop.example/p');
     });
 
     test('welcome has no cross-language fallback', () {
@@ -108,7 +113,7 @@ void main() {
   group('pause pills', () {
     List<String> shape() => c.messages.map((m) => m.role == ChatRole.system ? '[${m.text}]' : m.text).toList();
 
-    test('history: pill at bot_paused_at, right before the first staff row within 60 s', () async {
+    test('history: staff after the pause: pill sorted at bot_paused_at, before that staff row', () async {
       server.historyBody = {
         'messages': [
           row('user', 'hi', ts: '2026-10-30T22:19:00+00:00'),
@@ -125,7 +130,63 @@ void main() {
       expect(c.messages[2].ts, DateTime.utc(2026, 10, 30, 22, 20, 59));
     });
 
-    test('history: the staff row must be within 60 s, else the pill sits at bot_paused_at', () async {
+    Map<String, dynamic> pauseHistory(String staffTs, String pausedAt) => {
+          'messages': [
+            row('user', 'hi', ref: 'u0', ts: '2026-10-30T22:19:00+00:00'),
+            row('bot', 'bot reply', ref: 'b0', ts: '2026-10-30T22:19:30+00:00'),
+            row('bot', 'staff here', ref: 's1', ts: staffTs, sender: 'staff'),
+          ],
+          'bot_paused_at': pausedAt,
+          'cart': null,
+        };
+
+    test('staff row saved first (ts = bot_paused_at - 50 ms): [paused, staff] on cold load and after refresh',
+        () async {
+      server.historyBody = pauseHistory('2026-10-30T22:20:00.000+00:00', '2026-10-30T22:20:00.050+00:00');
+      make('ar');
+      await c.open();
+      await server.until(() => c.messages.isNotEmpty);
+      expect(shape(), ['hi', 'bot reply', '[paused]', 'staff here']);
+      final pill = c.messages[2];
+      await c.refreshHistory();
+      await c.refreshHistory();
+      expect(shape(), ['hi', 'bot reply', '[paused]', 'staff here']);
+      expect(c.messages[2], same(pill), reason: 'the pill does not jump or get rebuilt');
+    });
+
+    test('a live pill that follows its staff message by 50 ms stays put across a refresh', () async {
+      server.historyBody = {
+        'messages': [
+          row('user', 'hi', ref: 'u0', ts: '2026-10-30T22:19:00+00:00'),
+          row('bot', 'bot reply', ref: 'b0', ts: '2026-10-30T22:19:30+00:00'),
+        ],
+        'cart': null,
+      };
+      make('ar');
+      await c.open();
+      await server.until(() => server.live != null && c.messages.length == 2);
+      server.pushLive('message.new',
+          {'body_text': 'staff here', 'sent_by': 'owner', 'msg_ref': 's1', 'ts': '2026-10-30T22:20:00.000+00:00'});
+      await server.until(() => c.messages.length == 3);
+      server.pushLive('conversation.paused', {'bot_paused_at': '2026-10-30T22:20:00.050+00:00'});
+      await server.until(() => c.messages.length == 4);
+      expect(shape(), ['hi', 'bot reply', '[paused]', 'staff here']);
+      final pill = c.messages[2];
+      server.historyBody = pauseHistory('2026-10-30T22:20:00.000+00:00', '2026-10-30T22:20:00.050+00:00');
+      await c.refreshHistory();
+      expect(shape(), ['hi', 'bot reply', '[paused]', 'staff here']);
+      expect(c.messages[2], same(pill));
+    });
+
+    test('a staff row more than 60 s before the pause is not an anchor', () async {
+      server.historyBody = pauseHistory('2026-10-30T22:19:00.000+00:00', '2026-10-30T22:20:30+00:00');
+      make('ar');
+      await c.open();
+      await server.until(() => c.messages.isNotEmpty);
+      expect(shape(), ['hi', 'bot reply', 'staff here', '[paused]']);
+    });
+
+    test('a staff row long after the pause: the pill sits at bot_paused_at', () async {
       server.historyBody = {
         'messages': [
           row('user', 'hi', ts: '2026-10-30T22:19:00+00:00'),
@@ -139,18 +200,6 @@ void main() {
       await c.open();
       await server.until(() => c.messages.isNotEmpty);
       expect(shape(), ['hi', '[paused]', 'late bot', 'staff late']);
-    });
-
-    test('a staff row BEFORE the pause is not an anchor', () async {
-      server.historyBody = {
-        'messages': [row('bot', 'old staff', ref: 's0', ts: '2026-10-30T22:19:50+00:00', sender: 'staff')],
-        'bot_paused_at': '2026-10-30T22:20:00+00:00',
-        'cart': null,
-      };
-      make('ar');
-      await c.open();
-      await server.until(() => c.messages.isNotEmpty);
-      expect(shape(), ['old staff', '[paused]']);
     });
 
     test('live pill sorts by ts; a tie goes before the same-ts staff bubble; exact repeat is dropped', () async {
@@ -242,7 +291,20 @@ void main() {
       await server.until(() => c.messages.length == 2);
     });
 
-    test('client_ref of a turn we sent dedupes its live copy even with another msg_ref', () async {
+    test('staff client_ref dedupes a live copy that has a different msg_ref', () async {
+      make('ar');
+      await c.open();
+      await server.until(() => server.live != null);
+      server
+          .pushLive('message.new', {'body_text': 'أهلين', 'sent_by': 'owner', 'msg_ref': 'm1', 'client_ref': 'dash-1'});
+      await server.until(() => c.messages.length == 1);
+      server.pushLive(
+          'message.new', {'body_text': 'أهلين!', 'sent_by': 'owner', 'msg_ref': 'm2', 'client_ref': 'dash-1'});
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(c.messages, hasLength(1));
+    });
+
+    test('a bot reply is never deduped by our own client_message_id', () async {
       make('ar');
       await c.open();
       await server.until(() => server.live != null);
@@ -252,9 +314,21 @@ void main() {
       };
       server.chatReply = {'reply': 'تفضل', 'msg_ref': 'msg_1', 'action_data': {}};
       await c.send('x');
-      server.pushLive('message.new', {'body_text': 'تفضل!', 'msg_ref': 'other', 'client_ref': cid});
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(c.messages.where((m) => m.role == ChatRole.bot), hasLength(1));
+      server.pushLive('message.new', {'body_text': 'مختلف', 'msg_ref': 'other', 'client_ref': cid});
+      await server.until(() => c.messages.where((m) => m.role == ChatRole.bot).length == 2);
+    });
+
+    test('a live resumed pill lands after what is already shown, even a staff bubble stamped "now"', () async {
+      make('ar');
+      await c.open();
+      await server.until(() => server.live != null);
+      final future = DateTime.now().toUtc().add(const Duration(seconds: 5));
+      server.pushLive(
+          'message.new', {'body_text': 'staff', 'sent_by': 'owner', 'msg_ref': 'm1', 'ts': future.toIso8601String()});
+      await server.until(() => c.messages.isNotEmpty);
+      server.pushLive('conversation.resumed', {});
+      await server.until(() => c.messages.length == 2);
+      expect(c.messages.last.role, ChatRole.system);
     });
   });
 
@@ -458,6 +532,25 @@ void main() {
       final rich = tester.widgetList<RichText>(find.byType(RichText)).map((r) => r.text.toPlainText()).join('|');
       expect(rich, contains('http://shop.example/b'));
       expect(rich, contains('https://shöp.example/d'));
+      await finish(tester);
+    });
+
+    testWidgets('a trailing RLM / punctuation after a link keeps it tappable; userinfo links are plain',
+        (tester) async {
+      final got = <SunonoIntent>[];
+      final rlm = String.fromCharCode(0x200F);
+      server.historyRows = [
+        row('bot', 'شوف https://shop.example/p$rlm و https://shop.example@evil.com/x', ref: 'b1'),
+      ];
+      await tester.pumpWidget(app(SunonoChatView(
+          controller: make('ar', onIntent: (i) {
+        got.add(i);
+        return true;
+      }))));
+      await settle(tester);
+      await tester.tap(find.text('https://shop.example/p'));
+      expect((got.single as OpenUrlIntent).url, 'https://shop.example/p');
+      expect(find.text('https://shop.example@evil.com/x'), findsNothing, reason: 'not a link widget');
       await finish(tester);
     });
 

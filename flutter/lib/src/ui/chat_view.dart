@@ -521,7 +521,6 @@ class _BubbleText extends StatelessWidget {
   final Color? color;
 
   static final _url = RegExp(r'https://[^\s<>"]+');
-  static final _trailing = RegExp(r'[.,;:!?)\]}»؟،؛]+$');
 
   @override
   Widget build(BuildContext context) {
@@ -530,7 +529,7 @@ class _BubbleText extends StatelessWidget {
     var last = 0;
     for (final m in _url.allMatches(text)) {
       // Prose punctuation right after a link isn't part of it («…/p؟», «(…/p)»).
-      final url = m.group(0)!.replaceFirst(_trailing, '');
+      final url = trimLinkTail(m.group(0)!);
       // Unsafe (hidden format chars, non-ASCII host): stays plain text.
       if (!isSafeLink(url)) continue;
       if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));

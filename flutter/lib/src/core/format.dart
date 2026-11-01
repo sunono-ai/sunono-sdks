@@ -80,14 +80,23 @@ String formatTime(DateTime t, String lang) {
 }
 
 // Unicode format characters (category Cf): bidi controls, zero-width, joiners.
-final _format =
-    RegExp('[\u00AD\u0600-\u0605\u061C\u06DD\u070F\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]');
+const _formatChars =
+    '\u00AD\u0600-\u0605\u061C\u06DD\u070F\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF';
+final _format = RegExp('[$_formatChars]');
+final _linkTail = RegExp('[.,;:!?)\\]}»؟،؛$_formatChars]+\$');
 
-/// A link worth making tappable: `https://`, an ASCII host, and no hidden
-/// format characters (a bidi override can make `evil.com` read as another site).
+/// [url] without the prose punctuation and invisible format characters that
+/// trail it in running text («…/p؟», «(…/p)», «…/p» + RLM).
+String trimLinkTail(String url) => url.replaceFirst(_linkTail, '');
+
+/// A link worth making tappable: `https://`, an ASCII host, no userinfo, and no
+/// hidden format characters (a bidi override can make `evil.com` read as another site).
 bool isSafeLink(String url) {
   if (!url.startsWith('https://') || _format.hasMatch(url)) return false;
   // Check the raw authority: Uri.host would percent-encode a non-ASCII name.
   final authority = url.substring('https://'.length).split(RegExp('[/?#]')).first;
-  return authority.isNotEmpty && authority.codeUnits.every((c) => c < 128) && Uri.tryParse(url)?.host != '';
+  return authority.isNotEmpty &&
+      !authority.contains('@') &&
+      authority.codeUnits.every((c) => c < 128) &&
+      Uri.tryParse(url)?.host.isNotEmpty == true;
 }

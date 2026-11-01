@@ -58,7 +58,7 @@ class ChatMessage {
   String? handoffUrl;
   String? msgRef;
 
-  /// The `client_message_id` of the turn that produced this bubble (live dedupe).
+  /// The staff composer's `client_ref` from a live `message.new` (live dedupe).
   String? clientRef;
   DateTime ts;
   MessageState state;
@@ -557,7 +557,6 @@ class SunonoChatController extends ChangeNotifier {
       ..checkout = r.checkout
       ..handoffUrl = r.handoffUrl
       ..msgRef = r.msgRef
-      ..clientRef = bot._outgoing?.clientMessageId
       ..replyLang = r.replyLang
       ..ts = DateTime.now()
       ..state = MessageState.done
@@ -749,8 +748,10 @@ class SunonoChatController extends ChangeNotifier {
     return true;
   }
 
-  /// The "handed to our team" pill for a pause at [at]: right before the first
-  /// staff row within 60 s after it, else in time order at [at]. Idempotent.
+  /// The "handed to our team" pill for a pause at [at]. The dashboard saves the
+  /// staff row first and sets bot_paused_at slightly later, so the pill goes
+  /// right BEFORE the first staff row at or after `at - 60 s` when that row
+  /// precedes [at]; otherwise in time order at [at]. Idempotent.
   void _syncPausePill(DateTime? at) {
     if (at == null) return;
     final old = _messages
@@ -758,9 +759,9 @@ class SunonoChatController extends ChangeNotifier {
         .firstOrNull;
     if (old != null) _messages.remove(old);
     final pill = old ?? ChatMessage(id: _id(), role: ChatRole.system, text: 'paused', ts: at);
-    final staff = _messages.indexWhere(
-        (m) => m.role == ChatRole.staff && !m.ts.isBefore(at) && m.ts.difference(at) <= const Duration(seconds: 60));
-    if (staff >= 0) {
+    final from = at.subtract(const Duration(seconds: 60));
+    final staff = _messages.indexWhere((m) => m.role == ChatRole.staff && !m.ts.isBefore(from));
+    if (staff >= 0 && _messages[staff].ts.isBefore(at)) {
       _messages.insert(staff, pill);
     } else {
       _insertPill(pill);
@@ -789,8 +790,11 @@ class SunonoChatController extends ChangeNotifier {
         _syncPausePill(DateTime.tryParse('${data['bot_paused_at']}') ?? _clock());
       case 'conversation.resumed':
         _paused = false;
-        _insertPill(ChatMessage(
-            id: _id(), role: ChatRole.system, text: 'resumed', ts: DateTime.tryParse('${data['ts']}') ?? _clock()));
+        // A live event is "now"; never sort it before what is already shown.
+        final now = _clock();
+        final newest = _messages.fold<DateTime>(now, (t, m) => m.ts.isAfter(t) ? m.ts : t);
+        final at = newest.isAfter(now) ? newest.add(const Duration(milliseconds: 1)) : now;
+        _insertPill(ChatMessage(id: _id(), role: ChatRole.system, text: 'resumed', ts: at));
       case 'assistant.state':
         _typingHint = data['typing_hint'] != false;
       case 'cart.updated':
