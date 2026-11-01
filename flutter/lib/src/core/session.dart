@@ -30,6 +30,10 @@ class Session {
 
   String? get userId => _userId;
 
+  /// The shopper generation, bumped by [reset]. A multi-request flow (a turn,
+  /// an upload) takes it once and passes it to every [authed] call.
+  int get generation => _gen;
+
   /// The persisted shopper id, minted locally on first use. Single-flight,
   /// so concurrent first calls can't mint two different shoppers.
   Future<String> ensureUserId() {
@@ -105,13 +109,17 @@ class Session {
     return _token = res.token;
   }
 
-  /// Runs [call] with a token, re-initing once on an auth failure. A call
-  /// that started before a [reset] is never replayed as the new shopper.
-  Future<T> authed<T>(Future<T> Function(String token) call) async {
-    final gen = _gen;
+  /// Runs [call] with a token, re-initing once on an auth failure. [gen]
+  /// (default: now) is the [generation] the call belongs to: after a [reset]
+  /// it throws instead of sending anything as the new shopper.
+  Future<T> authed<T>(Future<T> Function(String token) call, {int? gen}) async {
+    gen ??= _gen;
     try {
       try {
-        return await call(await token());
+        if (gen != _gen) throw StateError('shopper was reset');
+        final t = await token();
+        if (gen != _gen) throw StateError('shopper was reset');
+        return await call(t);
       } on SunonoHttpException catch (e) {
         if (!e.isAuth) rethrow;
         if (gen != _gen) throw StateError('shopper was reset during the call');

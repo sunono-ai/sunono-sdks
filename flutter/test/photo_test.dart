@@ -323,6 +323,45 @@ void main() {
       expect(jsonDecode(server.bodies['/chat/stream']!.last)['image_ref'], 'img_ref_3');
     });
 
+    test('a stale-ref re-upload that a reset overtakes never streams the old photo as the new shopper', () async {
+      var now = DateTime(2026, 1, 1, 12);
+      c.dispose();
+      c = make(clock: () => now);
+      await c.open();
+      await ready();
+      now = now.add(const Duration(minutes: 56));
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      final sending = c.send('old shopper photo');
+      await server.until(() => server.count('/chat/upload') == 2);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([sending, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.count('/chat/stream'), 0);
+      expect(c.messages, isEmpty);
+    });
+
+    test('a 400 after a reset never re-uploads the old photo as the new shopper', () async {
+      await c.open();
+      await ready();
+      final gate = Completer<void>();
+      server
+        ..beforeStream = (() => gate.future)
+        ..failStreamWith = 400
+        ..failStreamTimes = 1
+        ..failStreamBody = {'message': 'image_ref is invalid or expired'};
+      final sending = c.send('old shopper photo');
+      await server.until(() => server.count('/chat/stream') == 1);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([sending, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.count('/chat/upload'), 1, reason: 'only the original attach');
+      expect(server.count('/chat/stream'), 1);
+      expect(c.messages, isEmpty);
+    });
+
     test('reset during an upload: the old shopper\'s photo never lands, the upload client is closed', () async {
       await c.open();
       final gate = Completer<void>();

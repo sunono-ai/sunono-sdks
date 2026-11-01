@@ -710,7 +710,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _uploadPhoto() async {
-    final image = _photoImage!, gen = ++_photoGen;
+    final image = _photoImage!, gen = ++_photoGen, shopper = _session.generation;
     _abortUpload?.complete();
     final abort = _abortUpload = Completer<void>();
     bool current() => gen == _photoGen && !_disposed;
@@ -725,10 +725,11 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     }
     _photo.value = const PhotoUploading(0);
     try {
-      final ref = await _session
-          .authed((t) => _api.upload(t, image.bytes, filename: image.filename, abort: abort.future, onProgress: (p) {
+      final ref = await _session.authed(
+          (t) => _api.upload(t, image.bytes, filename: image.filename, abort: abort.future, onProgress: (p) {
                 if (current()) _photo.value = PhotoUploading(p);
-              }));
+              }),
+          gen: shopper);
       if (!current()) return;
       _photoReadyAt = _clock();
       _photo.value = PhotoReady(ref);
@@ -754,7 +755,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _run(_Outgoing out) async {
-    final epoch = _epoch;
+    // Every request of this turn is the shopper's who started it: after a
+    // reset, authed throws before sending anything as the new one.
+    final epoch = _epoch, gen = _session.generation;
     _busy = true;
     _running = out;
     final bot = ChatMessage(id: _id(), role: ChatRole.bot, state: MessageState.thinking).._outgoing = out;
@@ -767,14 +770,16 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         await _bind(ensure: true);
       }
       final result = out.imageRef == null
-          ? await _session.authed((t) => _api.chat(t, out.text,
-              lang: _lang,
-              synthetic: out.synthetic,
-              productId: out.productId,
-              productSku: out.productSku,
-              tap: out.tap,
-              clientMessageId: out.clientMessageId))
-          : await _photoTurn(out, bot);
+          ? await _session.authed(
+              (t) => _api.chat(t, out.text,
+                  lang: _lang,
+                  synthetic: out.synthetic,
+                  productId: out.productId,
+                  productSku: out.productSku,
+                  tap: out.tap,
+                  clientMessageId: out.clientMessageId),
+              gen: gen)
+          : await _photoTurn(out, bot, gen);
       if (epoch == _epoch) _apply(bot, result);
     } on SunonoHttpException catch (e) {
       if (epoch != _epoch) return;
@@ -782,19 +787,19 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         _messages.remove(bot); // the session already switched us to disabled
       } else if (e.isTurnInProgress) {
         // The turn is running server-side: wait for it, never resend.
-        await _recover(bot, out, epoch);
+        await _recover(bot, out, epoch, gen);
       } else if (e.status < 500) {
         // 4xx (rate limit, origin, bad photo…) is refused before any work.
         _fail(bot, switch (e.status) { 429 => 'rate_limited', _ => e.code ?? 'http_${e.status}' });
       } else {
         // A 5xx (e.g. a gateway timeout) may arrive after the turn ran.
         _emit(ErrorEvent(e));
-        await _recover(bot, out, epoch);
+        await _recover(bot, out, epoch, gen);
       }
     } catch (e, s) {
       if (epoch != _epoch) return;
       _emit(ErrorEvent(e, s));
-      await _recover(bot, out, epoch);
+      await _recover(bot, out, epoch, gen);
     } finally {
       if (epoch == _epoch) {
         _busy = false;
@@ -804,26 +809,27 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<TurnResult> _photoTurn(_Outgoing out, ChatMessage bot) async {
-    if (_clock().difference(out.imageReadyAt!) > _imageRefMaxAge) await _reupload(out);
+  Future<TurnResult> _photoTurn(_Outgoing out, ChatMessage bot, int gen) async {
+    if (_clock().difference(out.imageReadyAt!) > _imageRefMaxAge) await _reupload(out, gen);
     try {
-      return await _photoStream(out, bot);
+      return await _photoStream(out, bot, gen);
     } on SunonoHttpException catch (e) {
       // 400 is refused before any work (an expired or unknown image_ref): the
       // same client_message_id is safe to send again with a fresh upload.
       if (e.status != 400) rethrow;
-      await _reupload(out);
-      return _photoStream(out, bot);
+      await _reupload(out, gen);
+      return _photoStream(out, bot, gen);
     }
   }
 
-  Future<void> _reupload(_Outgoing out) async {
-    out.imageRef = await _session.authed((t) => _api.upload(t, out.image!.bytes, filename: out.image!.filename));
+  Future<void> _reupload(_Outgoing out, int gen) async {
+    out.imageRef =
+        await _session.authed((t) => _api.upload(t, out.image!.bytes, filename: out.image!.filename), gen: gen);
     out.imageReadyAt = _clock();
   }
 
-  Future<TurnResult> _photoStream(_Outgoing out, ChatMessage bot) {
-    return _session.authed((t) async {
+  Future<TurnResult> _photoStream(_Outgoing out, ChatMessage bot, int gen) {
+    return _session.authed(gen: gen, (t) async {
       TurnResult? done;
       await for (final SseFrame f in _api.chatStream(t, out.text,
           lang: _lang,
@@ -893,7 +899,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// The send may or may not have reached the server (PROTOCOL §10). A live
   /// bot message cuts the wait short.
-  Future<void> _recover(ChatMessage bot, _Outgoing out, int epoch) async {
+  Future<void> _recover(ChatMessage bot, _Outgoing out, int epoch, int gen) async {
     // A history merge may already have matched our user bubble to its
     // server row (and appended the reply): then the turn happened.
     bool merged() => out.user.msgRef != null;
@@ -920,7 +926,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       final History h;
       final ticket = ++_cartReq, gen = _linkGen;
       try {
-        h = await _session.authed(_api.history);
+        h = await _session.authed(_api.history, gen: gen);
       } catch (_) {
         if (epoch != _epoch) return;
         if (liveRef != null) {

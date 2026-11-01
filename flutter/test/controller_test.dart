@@ -328,6 +328,22 @@ void main() {
       expect(server.count('/chat/upload'), 1);
     });
 
+    test('a slow first-send cart ensure that a reset overtakes never sends the old message', () async {
+      final bridge = _GatedBridge();
+      final ctl = make(bridge: bridge);
+      await ctl.open();
+      await server.until(() => server.live != null);
+      final sending = ctl.send('old shopper');
+      await server.until(() => bridge.ensures == 1);
+      final resetting = ctl.reset();
+      bridge.gate.complete();
+      await Future.wait([sending, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.bodies['/chat'] ?? const [], isEmpty, reason: 'nothing sent as the new shopper');
+      expect(ctl.messages, isEmpty);
+      ctl.dispose();
+    });
+
     test('a disposed controller never opens or resumes', () async {
       final ctl = make();
       ctl.dispose();
@@ -399,6 +415,21 @@ void main() {
 }
 
 Future<void> pumpEvents() => Future<void>.delayed(Duration.zero);
+
+/// ensureBind waits for [gate]; probe has nothing to bind.
+class _GatedBridge implements SunonoCartBridge {
+  final gate = Completer<void>();
+  int ensures = 0;
+  @override
+  Future<Map<String, dynamic>?> probe(String userId) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> ensureBind(String userId) async {
+    ensures++;
+    await gate.future;
+    return {'sig': 'x'};
+  }
+}
 
 class _Bridge implements SunonoCartBridge {
   final calls = <String>[];

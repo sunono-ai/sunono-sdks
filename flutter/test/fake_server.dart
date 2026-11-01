@@ -29,6 +29,10 @@ class FakeServer {
   bool dropChat = false;
   Future<void> Function()? beforeChatReply;
   Future<void> Function()? beforeConfig;
+  Future<void> Function()? beforeStream;
+
+  /// One-shot `/chat/cart` failure status.
+  int? failCartOnceWith;
   Future<void> Function()? beforeUpload;
 
   /// One-shot `/chat/upload` failure `(status, error code)`.
@@ -101,6 +105,11 @@ class FakeServer {
       case '/chat/cart':
         final body = cartBody; // the answer as of the request, however long it is held
         await beforeCartReply?.call();
+        if (failCartOnceWith != null) {
+          final s = failCartOnceWith!;
+          failCartOnceWith = null;
+          return _json({'message': 'nope'}, s);
+        }
         return _json(body);
       case '/chat/subscribe-ticket':
         return _json({'ticket': 't'});
@@ -116,6 +125,7 @@ class FakeServer {
         }
         return _json({'image_ref': 'img_ref_${count('/chat/upload')}'});
       case '/chat/stream':
+        await beforeStream?.call();
         if (failStreamTimes > 0) {
           failStreamTimes--;
           return _json(failStreamBody, failStreamWith!);
