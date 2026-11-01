@@ -454,13 +454,17 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// App came back: config if stale, history first, then live again; re-check
-  /// the cart link.
+  /// the cart link. An idle chat with a view attached opens.
   void resume() {
     final at = _configAt;
     final stale = at == null || _clock().difference(at) > _configMaxAge;
     if (_status == ChatStatus.disabled) {
       // A shop that switched chat back on returns without re-attaching the view.
       if (stale) unawaited(open());
+      return;
+    }
+    if (_status == ChatStatus.idle) {
+      if (_observing) unawaited(open()); // a view is showing a reset chat
       return;
     }
     if (_status != ChatStatus.ready) return;
@@ -480,7 +484,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _epoch++;
     removePhoto();
     _live.stop();
-    final wasOpen = _status == ChatStatus.ready;
+    final wasOpen = _status != ChatStatus.idle; // loading and disabled re-open too
     final oldId = _session.userId, oldToken = _session.currentToken;
     final cleared = _session.reset(); // memory now, storage below
     _messages.clear();

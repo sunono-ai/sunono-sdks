@@ -512,6 +512,39 @@ void main() {
       expect(tokens.toSet(), hasLength(2), reason: 'each with its own shopper token ($a, $b)');
     });
 
+    test('reset while open() is still loading opens the new shopper', () async {
+      final gate = Completer<void>();
+      server.beforeConfig = () => gate.future;
+      final opening = c.open();
+      await server.until(() => server.count('/widget/config') == 1);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([opening, resetting]);
+      await server.until(() => c.status == ChatStatus.ready);
+    });
+
+    test('reset while disabled checks the shop again', () async {
+      server.config = {'enabled': false};
+      await c.open();
+      expect(c.status, ChatStatus.disabled);
+      server.config = {'enabled': true};
+      await c.reset();
+      await server.until(() => c.status == ChatStatus.ready);
+    });
+
+    test('a resume while a reset waits on storage opens the new shopper at once', () async {
+      final storage = _FlakyStorage();
+      c.dispose();
+      c = make(storage: storage);
+      c.attach();
+      await server.until(() => server.live != null);
+      storage.hangPendingWrite = true;
+      unawaited(c.reset()); // waits up to storageTimeout before re-opening
+      expect(c.status, ChatStatus.idle);
+      c.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await server.until(() => c.status == ChatStatus.ready, timeout: const Duration(seconds: 1));
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
     test('a controller never used sends no forget', () async {
       await c.reset();
       await Future<void>.delayed(const Duration(milliseconds: 20));

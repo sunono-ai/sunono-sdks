@@ -28,6 +28,7 @@ class FakeServer {
   Map<String, dynamic> failChatBody = {'message': 'nope'};
   bool dropChat = false;
   Future<void> Function()? beforeChatReply;
+  Future<void> Function()? beforeConfig;
   Future<void> Function()? beforeUpload;
 
   /// One-shot `/chat/upload` failure `(status, error code)`.
@@ -81,6 +82,7 @@ class FakeServer {
         final uid = (jsonDecode(body) as Map)['user_id'] ?? '00000000-0000-4000-8000-000000000000';
         return _json({'access_token': 'tok${++_tokens}', 'user_id': uid, 'session_id': 's'});
       case '/widget/config':
+        await beforeConfig?.call();
         return _json(config);
       case '/chat':
         if (dropChat) throw http.ClientException('Connection reset by peer');
