@@ -203,6 +203,14 @@ class SunonoApi {
     return '${_obj(await _decode(r))['ticket']}';
   }
 
+  /// Detach this device from the shopper (PROTOCOL §11): `204`, no body.
+  Future<void> forget(String token) async {
+    final r = await _client
+        .post(Uri.parse('$_shop/chat/forget'), headers: _headers(token: token, json: true), body: '{}')
+        .timeout(requestTimeout);
+    await _decode(r);
+  }
+
   /// Opens the live stream on its own connection; [close] it to disconnect.
   Future<({Stream<SseFrame> frames, void Function() close})> subscribe(String ticket) async {
     final client = _newClient();

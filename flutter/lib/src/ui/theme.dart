@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/models.dart';
+
 /// Colors and type for the assistant. Start from the host's Material theme
 /// with [SunonoTheme.fromMaterial]; every field can be overridden.
 @immutable
@@ -30,6 +32,27 @@ class SunonoTheme {
       muted: c.onSurfaceVariant,
       danger: c.error,
       fontFamily: t.textTheme.bodyMedium?.fontFamily,
+    );
+  }
+
+  /// The shop's dashboard look over [fallback]: `primary_color` as [primary],
+  /// and dark surfaces when `color_scheme` is `dark`. Used when the host
+  /// passes no theme; anything the dashboard leaves unset keeps [fallback].
+  factory SunonoTheme.fromConfig(ShopConfig config, {required SunonoTheme fallback}) {
+    final primary = config.primaryColor ?? fallback.primary;
+    final dark = config.colorScheme == 'dark';
+    return SunonoTheme(
+      primary: primary,
+      accent: fallback.accent,
+      background:
+          dark ? Color.alphaBlend(primary.withValues(alpha: 0.05), const Color(0xFF131218)) : fallback.background,
+      surface: dark ? const Color(0xFF1F1D26) : fallback.surface,
+      onSurface: dark ? const Color(0xFFECEAF2) : fallback.onSurface,
+      muted: dark ? const Color(0xFFA9A5B4) : fallback.muted,
+      success: dark ? const Color(0xFF3DD69A) : fallback.success,
+      danger: dark ? const Color(0xFFFF7A93) : fallback.danger,
+      fontFamily: fallback.fontFamily,
+      radius: fallback.radius,
     );
   }
 

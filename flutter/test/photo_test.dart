@@ -426,6 +426,7 @@ void main() {
       expect(server.count('/chat/stream'), 1);
       expect(server.count('/chat/upload'), 1);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
 
     testWidgets('image_unavailable shows the per-code copy without Retry; picking again uploads anew', (tester) async {
@@ -441,6 +442,7 @@ void main() {
       expect(c.photo.value, isA<PhotoReady>());
       expect(server.count('/chat/upload'), 2);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
 
     testWidgets('a retryable failure shows Retry, which re-uploads', (tester) async {
@@ -453,6 +455,7 @@ void main() {
       expect(c.photo.value, isA<PhotoReady>());
       expect(server.count('/chat/upload'), 2);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
 
     testWidgets('customer_blocked copy; a failed unusable photo: Send is tappable, no Retry, text goes alone',
@@ -473,6 +476,7 @@ void main() {
       expect(c.photo.value, isA<PhotoIdle>());
       expect(find.text("We can't accept photos right now"), findsNothing);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
 
     testWidgets('a retryable failure keeps Send inert until Retry works', (tester) async {
@@ -490,6 +494,7 @@ void main() {
       await tapSend(tester);
       expect(server.count('/chat/stream'), 1);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
 
     testWidgets('English copy, remove button aborts, 320 px at 200% lays out', (tester) async {
@@ -507,6 +512,7 @@ void main() {
       expect(c.photo.value, isA<PhotoIdle>());
       expect(find.text("Photos aren't available right now — tell me in words"), findsNothing);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
 
     testWidgets('a too-large photo shows no Retry (same bytes would fail again)', (tester) async {
@@ -529,6 +535,7 @@ void main() {
       expect(find.text('Retry'), findsNothing);
       expect(server.count('/chat/upload'), 0);
       await tester.pumpWidget(const SizedBox());
+      c.suspend(); // the live connection outlives the view
     });
   });
 }

@@ -37,6 +37,11 @@ class FakeServer {
   int? failStreamWith;
   int failStreamTimes = 0;
   Map<String, dynamic> failStreamBody = {'error': 'bad_request'};
+
+  /// `/chat/forget` answers [failForgetWith] this many times, then 204.
+  int failForgetTimes = 0;
+  int failForgetWith = 500;
+  Future<void> Function()? beforeForget;
   StreamController<List<int>>? live;
   int _tokens = 0;
 
@@ -116,6 +121,13 @@ class FakeServer {
         const frames = 'data: {"type":"stage","stage":"understand"}\n\n'
             'data: {"type":"done","reply":"هاي الصورة","msg_ref":"msg_p","action_data":{}}\n\n';
         return http.StreamedResponse(Stream.value(utf8.encode(frames)), 200);
+      case '/chat/forget':
+        await beforeForget?.call();
+        if (failForgetTimes > 0) {
+          failForgetTimes--;
+          return _json({'error': 'nope'}, failForgetWith);
+        }
+        return http.StreamedResponse(const Stream.empty(), 204);
       case '/widget/cart-binding':
         return _json({'bound': true, 'replayed': false});
     }

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/widgets.dart';
 
 import 'api.dart';
 import 'format.dart';
@@ -123,20 +125,28 @@ class _Outgoing {
 }
 
 /// The chat state machine. UI-free: a host can drive its own UI from it.
-class SunonoChatController extends ChangeNotifier {
+///
+/// Once a view [attach]es, the controller follows the app lifecycle itself:
+/// the live connection runs while it is open and the app is in the
+/// foreground, whether or not a view is showing, so [unread] keeps counting.
+class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
+  /// [lang] null follows the shop's `default_language` once config loads.
   SunonoChatController({
     required SunonoApi api,
     required SunonoStorage storage,
-    String lang = 'ar',
+    String? lang,
     this.cartBridge,
     this.nativeCheckout = false,
     this.onIntent,
     this.starterPrompts,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
+    this.forgetTimeout = const Duration(seconds: 3),
     DateTime Function() clock = DateTime.now,
   })  : _api = api,
+        _storage = storage,
         _clock = clock,
-        _lang = lang {
+        _lang = lang ?? 'ar',
+        _langPinned = lang != null {
     _session = Session(api, storage, onPlatformDisabled: () => _disable('platform_disabled'));
     _live = LiveConnection(
       api: api,
@@ -148,6 +158,7 @@ class SunonoChatController extends ChangeNotifier {
   }
 
   final SunonoApi _api;
+  final SunonoStorage _storage;
   late final Session _session;
   late final LiveConnection _live;
   final SunonoCartBridge? cartBridge;
@@ -166,6 +177,13 @@ class SunonoChatController extends ChangeNotifier {
   /// Delays between history checks while recovering (cumulative waits).
   final List<Duration> recoveryChecks;
 
+  /// The longest [reset] waits on `/chat/forget` before clearing anyway.
+  final Duration forgetTimeout;
+
+  /// A [reset] whose forget failed leaves the old shopper id here; the next
+  /// [open] retries it.
+  static const _pendingForgetKey = 'sunono.pending_forget';
+
   final DateTime Function() _clock;
 
   /// Config older than this is re-fetched on [resume].
@@ -180,6 +198,9 @@ class SunonoChatController extends ChangeNotifier {
   /// msg_refs trimmed off the top of [_messages] (grows only as the thread does).
   final Set<String> _trimmed = {};
   String _lang;
+
+  /// The host chose the language: the shop's default no longer applies.
+  bool _langPinned;
   ChatStatus _status = ChatStatus.idle;
   ShopConfig _config = const ShopConfig();
   DateTime? _configAt;
@@ -206,7 +227,14 @@ class SunonoChatController extends ChangeNotifier {
 
   /// Bumped by reset()/dispose(): late results for an old shopper are dropped.
   int _epoch = 0;
-  int _views = 0;
+
+  /// Attached views currently on screen (see [setVisible]).
+  final Set<Object> _visible = {};
+  final _unread = ValueNotifier<int>(0);
+  final _cartCount = ValueNotifier<int>(0);
+  bool _observing = false;
+  bool _background = false;
+  bool _updateReported = false;
   Completer<String?>? _recoverWake;
   DateTime? _photoReadyAt;
   final _photo = ValueNotifier<PhotoState>(const PhotoIdle());
@@ -228,6 +256,13 @@ class SunonoChatController extends ChangeNotifier {
 
   /// A human currently owns the conversation.
   bool get paused => _paused;
+
+  /// Bot and staff messages that arrived while no attached view was visible;
+  /// back to 0 when one becomes visible. For a tab or launcher badge.
+  ValueListenable<int> get unread => _unread;
+
+  /// Items in the shopper's cart, for a badge; follows every cart change.
+  ValueListenable<int> get cartCount => _cartCount;
 
   /// A turn is in flight; the composer should not send.
   bool get busy => _busy;
@@ -253,10 +288,13 @@ class SunonoChatController extends ChangeNotifier {
       }
       _messages.removeRange(0, over);
     }
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _cartCount.value = _cart?.count ?? 0;
+    notifyListeners();
   }
 
   set lang(String value) {
+    _langPinned = true;
     if (value == _lang) return;
     _lang = value == 'en' ? 'en' : 'ar';
     _changed();
@@ -265,15 +303,79 @@ class SunonoChatController extends ChangeNotifier {
   // ---------------------------------------------------------------- lifecycle
 
   /// A view started showing this controller (a tab and a sheet may both).
+  /// From here on the controller follows the app lifecycle itself.
   void attach() {
-    _views++;
+    if (!_observing && !_disposed) {
+      WidgetsBinding.instance.addObserver(this);
+      _observing = true;
+    }
+    _emit(const AnalyticsEvent('assistant_opened'));
     open();
   }
 
-  /// A view went away; the live connection stops when none are left.
-  void detach() {
-    if (_views > 0) _views--;
-    if (_views == 0) suspend();
+  /// A view went away. The live connection keeps running (and [unread]
+  /// counting) until the app goes to the background.
+  void detach([Object? view]) {
+    if (view != null) setVisible(view, false);
+  }
+
+  /// Whether [view] is on screen now (a hidden tab, a covered route are not).
+  /// Becoming visible clears [unread].
+  void setVisible(Object view, bool visible) {
+    if (visible) {
+      _visible.add(view);
+      if (!_disposed) _unread.value = 0;
+    } else {
+      _visible.remove(view);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _background = false;
+      resume();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      _background = true;
+      suspend();
+    }
+  }
+
+  /// The live connection runs only in the foreground.
+  void _goLive() {
+    if (!_background) _live.start();
+  }
+
+  /// A bot or staff message landed: a badge count while nothing shows the
+  /// chat, else a polite screen-reader announcement.
+  void _arrived(ChatMessage m) {
+    if (_disposed) return;
+    if (_visible.isEmpty) {
+      _unread.value++;
+      return;
+    }
+    final text = sanitizeReply(m.text).trim();
+    if (text.isEmpty) return;
+    // ponytail: SemanticsService.sendAnnouncement needs Flutter 3.35; the floor is 3.27.
+    // ignore: deprecated_member_use
+    unawaited(SemanticsService.announce(
+        text, isRtlText(text, fallbackRtl: _lang != 'en') ? TextDirection.rtl : TextDirection.ltr));
+  }
+
+  /// Apply a fetched config: typing hint, the shop's default language (until
+  /// the host picks one), and one `assistant_update_required` per controller.
+  void _applyConfig(ShopConfig fresh) {
+    _config = fresh;
+    _configAt = _clock();
+    _typingHint = fresh.typingHint;
+    if (!_langPinned) {
+      _langPinned = true;
+      _lang = fresh.defaultLanguage;
+    }
+    if (!_updateReported && updateRequired) {
+      _updateReported = true;
+      _emit(const AnalyticsEvent('assistant_update_required'));
+    }
   }
 
   /// Load config and history, bind the cart, go live. Safe to call again.
@@ -286,8 +388,7 @@ class SunonoChatController extends ChangeNotifier {
     _status = ChatStatus.loading;
     _changed();
     try {
-      _config = await _api.config();
-      _configAt = _clock();
+      _applyConfig(await _api.config());
     } catch (e, s) {
       _emit(ErrorEvent(e, s)); // keep defaults: config is presentation only
     }
@@ -296,14 +397,13 @@ class SunonoChatController extends ChangeNotifier {
       _disable(_config.disabledReason);
       return;
     }
-    _typingHint = _config.typingHint;
     _disabledReason = null;
     _status = ChatStatus.ready;
     _ensureTried = false;
     _changed();
-    _emit(const AnalyticsEvent('assistant_opened'));
+    unawaited(_retryForget());
     unawaited(_bind(ensure: false));
-    _live.start(); // fetches history first
+    _goLive(); // fetches history first
   }
 
   /// App went to background: drop the live connection.
@@ -327,8 +427,7 @@ class SunonoChatController extends ChangeNotifier {
     try {
       final fresh = await _api.config();
       if (epoch != _epoch || _disposed) return;
-      _config = fresh;
-      _typingHint = fresh.typingHint;
+      _applyConfig(fresh);
       if (!fresh.enabled) {
         _disable(fresh.disabledReason);
         return;
@@ -353,15 +452,19 @@ class SunonoChatController extends ChangeNotifier {
     if (_status != ChatStatus.ready) return;
     if (stale) unawaited(_refreshConfig());
     unawaited(_bind(ensure: false));
-    _live.start();
+    _goLive();
   }
 
-  /// Forget this shopper (logout / account switch). Anything still in
-  /// flight for the old shopper is dropped when it lands.
+  /// Forget this shopper (logout / account switch): detach the device on the
+  /// server (`/chat/forget`, best effort, at most [forgetTimeout]), then clear
+  /// everything local. Anything still in flight for the old shopper is
+  /// dropped when it lands.
   Future<void> reset() async {
     _epoch++;
     removePhoto(); // before any await: nothing of the old shopper may land
     _live.stop();
+    final wasOpen = _status == ChatStatus.ready;
+    await _forget();
     await _session.reset();
     _messages.clear();
     _trimmed.clear();
@@ -370,10 +473,41 @@ class SunonoChatController extends ChangeNotifier {
     _unbind();
     _busy = false;
     _running = null;
-    final wasOpen = _status == ChatStatus.ready;
     _status = ChatStatus.idle;
+    if (!_disposed) _unread.value = 0;
     _changed();
-    if (wasOpen) await open();
+    if (wasOpen && !_disposed) await open();
+  }
+
+  Future<void> _forget() async {
+    try {
+      final id = await _session.storedUserId();
+      if (id == null) return; // never used: nothing to detach
+      try {
+        await _session.authed(_api.forget).timeout(forgetTimeout);
+      } catch (_) {
+        await _storage.write(_pendingForgetKey, id);
+      }
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s)); // storage failed: the reset still goes ahead
+    }
+  }
+
+  /// A forget a [reset] couldn't deliver: once more for that old shopper.
+  Future<void> _retryForget() async {
+    try {
+      final old = await _storage.read(_pendingForgetKey);
+      if (old == null) return;
+      try {
+        await _api.forget((await _api.init(old)).token);
+      } on SunonoHttpException catch (e) {
+        // 429 or 5xx: try on a later open. Any other refusal won't change.
+        if (e.status == 429 || e.status >= 500) return;
+      }
+      await _storage.delete(_pendingForgetKey);
+    } catch (_) {
+      // offline: try on a later open
+    }
   }
 
   /// Re-run the cart binding (after host login/logout/cart replacement).
@@ -458,7 +592,10 @@ class SunonoChatController extends ChangeNotifier {
     _epoch++;
     _photoGen++;
     _abortUpload?.complete();
+    if (_observing) WidgetsBinding.instance.removeObserver(this);
     _photo.dispose();
+    _unread.dispose();
+    _cartCount.dispose();
     _live.stop();
     _api.close();
     _events.close();
@@ -687,10 +824,9 @@ class SunonoChatController extends ChangeNotifier {
       _messages.remove(bot); // paused / blocked / silenced: say nothing
       return;
     }
-    // A live message.new for the same reply may have landed first.
-    if (r.msgRef != null) {
-      _messages.removeWhere((m) => !identical(m, bot) && m.msgRef == r.msgRef);
-    }
+    // A live message.new for the same reply may have landed first (and was counted).
+    final liveFirst = r.msgRef != null && _messages.any((m) => !identical(m, bot) && m.msgRef == r.msgRef);
+    if (liveFirst) _messages.removeWhere((m) => !identical(m, bot) && m.msgRef == r.msgRef);
     bot
       ..text = r.reply
       ..products = r.products
@@ -704,6 +840,7 @@ class SunonoChatController extends ChangeNotifier {
       ..state = MessageState.done
       ..stage = null;
     if (!_messages.contains(bot)) _messages.add(bot);
+    if (!liveFirst) _arrived(bot);
     if (r.checkout is CheckoutPlaced) _emit(const AnalyticsEvent('assistant_order_placed'));
   }
 
@@ -832,7 +969,9 @@ class SunonoChatController extends ChangeNotifier {
         } else if (r.msgRef == null && _sameRecentBubble(r)) {
           continue;
         }
-        _messages.add(_fromRow(r));
+        final m = _fromRow(r);
+        _messages.add(m);
+        if (m.role != ChatRole.user) _arrived(m); // e.g. a staff reply while live was down
       }
       // A recovering send whose user row just showed up did happen: its
       // reply rows were appended above, so the placeholder goes.
@@ -923,8 +1062,10 @@ class SunonoChatController extends ChangeNotifier {
         var image = media is Map && media['kind'] == 'image' && media['url'] is String ? media['url'] as String : null;
         if (image != null && image.startsWith('/')) image = '${_api.apiOrigin}$image';
         if (image != null && !image.startsWith('https://') && !image.startsWith('http://')) image = null;
-        _messages.add(
-            ChatMessage(id: _id(), role: role, text: text, msgRef: ref, clientRef: clientRef, ts: ts, imageUrl: image));
+        final m =
+            ChatMessage(id: _id(), role: role, text: text, msgRef: ref, clientRef: clientRef, ts: ts, imageUrl: image);
+        _messages.add(m);
+        _arrived(m);
         if (role == ChatRole.bot && _recoverWake?.isCompleted == false) _recoverWake!.complete(ref ?? '');
         _recoverWake = null;
       case 'conversation.paused':

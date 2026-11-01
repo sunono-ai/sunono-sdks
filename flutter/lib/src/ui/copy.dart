@@ -26,7 +26,7 @@ class SunonoCopy {
   String get retry => _t('أعد المحاولة', 'Retry');
   String get recovering => _t('بتأكد إنها وصلت…', 'Checking it went through…');
   String get disabled => _t('المساعد مش متاح هلّق', 'The assistant is unavailable right now');
-  String get updateApp => _t('حدّث التطبيق لتستخدم المساعد', 'Update the app to use the assistant');
+  String get updateApp => _t('حدّث التطبيق عشان تستخدم المساعد', 'Please update the app to use the assistant');
   String get online => _t('متصل', 'Online');
   String get humanOnline => _t('فريق المتجر معك', 'Store team is with you');
 

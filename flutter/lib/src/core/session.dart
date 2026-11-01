@@ -49,6 +49,13 @@ class Session {
     return id;
   }
 
+  /// The shopper id in memory or storage, without minting one.
+  Future<String?> storedUserId() async {
+    if (_userId != null) return _userId;
+    final id = await _storage.read(_key);
+    return id != null && _uuid.hasMatch(id) ? id : null;
+  }
+
   /// A valid token; [force] re-inits (after a 401/422).
   Future<String> token({bool force = false}) {
     if (!force && _token != null) return Future.value(_token!);

@@ -24,7 +24,7 @@ void main() {
   Sunono.init(
     shopKey: 'pk_live_…',
     appOrigin: 'https://your-store.example',
-    locale: 'ar',                       // follow your app: Sunono.setLocale('en')
+    locale: 'ar',                       // omit for the shop's default; follow your app: Sunono.setLocale('en')
     storage: MySecureStorage(),         // required: persists the anonymous shopper (see below)
     nativeCheckout: true,               // CheckoutIntent opens your own checkout screen
     onIntent: (intent) {
@@ -53,6 +53,19 @@ Sunono.view(theme: SunonoTheme.fromMaterial(Theme.of(context), accent: brandGold
 Sunono.open(context, initialMessage: 'Is this available in size 42?');
 ```
 
+Without a `theme`, the chat uses the dashboard's brand color and light/dark scheme over your Material theme, and the header shows the shop's avatar. Pass `autofocus: true` to raise the keyboard when the chat opens (off by default, so a Chat tab doesn't pop it).
+
+## Badges
+
+```dart
+ValueListenableBuilder<int>(
+  valueListenable: Sunono.unread,       // or Sunono.cartCount
+  builder: (_, n, __) => Badge.count(count: n, isLabelVisible: n > 0, child: const Icon(Icons.chat_outlined)),
+);
+```
+
+`unread` counts assistant and staff messages that arrive while no chat view is on screen (a hidden tab or a covered route counts as off screen) and clears when one shows. The live connection keeps running while the app is in the foreground, even with the chat hidden, and stops in the background.
+
 ## Storage
 
 The SDK identifies the shopper with an anonymous id that should survive app restarts, so the cart and chat history come back. `storage` is required. Implement `SunonoStorage` over secure storage (`MemoryStorage` is for tests and demos: it starts a new shopper on every launch):
@@ -66,7 +79,7 @@ class MySecureStorage implements SunonoStorage {
 }
 ```
 
-On **logout or account switch**, call `Sunono.reset()` so the next person never sees the previous chat or cart.
+On **logout or account switch**, call `Sunono.reset()` so the next person never sees the previous chat or cart. It first asks the server to detach this device (best effort, a few seconds at most; retried on the next open if it fails), then clears everything local.
 
 ## Events
 

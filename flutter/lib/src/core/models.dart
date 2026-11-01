@@ -2,6 +2,8 @@
 // Every parser is lenient: unknown keys are ignored, missing optional keys
 // become null, and a wrong-typed field never throws.
 
+import 'dart:ui' show Color;
+
 T? _as<T>(Object? v) => v is T ? v : null;
 
 String? _str(Object? v) => v is String && v.isNotEmpty ? v : null;
@@ -482,6 +484,11 @@ class TurnResult {
 }
 
 /// `/widget/config` (PROTOCOL §3).
+Color? _hexColor(String? v) {
+  final m = v == null ? null : RegExp(r'^#([0-9a-fA-F]{6})$').firstMatch(v);
+  return m == null ? null : Color(0xFF000000 | int.parse(m[1]!, radix: 16));
+}
+
 class ShopConfig {
   const ShopConfig({
     this.enabled = true,
@@ -494,6 +501,8 @@ class ShopConfig {
     this.typingHint = true,
     this.minSdkVersion,
     this.disabledReason,
+    this.primaryColor,
+    this.colorScheme,
   });
 
   factory ShopConfig.fromJson(Map<String, dynamic> j) => ShopConfig(
@@ -507,6 +516,8 @@ class ShopConfig {
         typingHint: j['typing_hint'] != false,
         minSdkVersion: _str(_map(j['app'])['min_sdk_version']),
         disabledReason: _str(j['reason']),
+        primaryColor: _hexColor(_str(j['primary_color'])),
+        colorScheme: switch (_str(j['color_scheme'])) { 'dark' => 'dark', 'light' => 'light', _ => null },
       );
 
   final bool enabled;
@@ -523,6 +534,12 @@ class ShopConfig {
 
   /// Why `enabled` is false, e.g. `platform_disabled`.
   final String? disabledReason;
+
+  /// The dashboard's brand color (`primary_color`, `#RRGGBB`).
+  final Color? primaryColor;
+
+  /// The dashboard's `color_scheme`: `light`, `dark`, or null when unset.
+  final String? colorScheme;
 
   String? title(String lang) => pickLang(titleAr, titleEn, lang);
 

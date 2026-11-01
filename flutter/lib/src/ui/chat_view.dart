@@ -10,8 +10,10 @@ import 'orb.dart';
 import 'theme.dart';
 
 /// The full assistant screen. Put it in a tab body or a route; it opens the
-/// controller, follows app lifecycle (live connection off in background) and
-/// renders everything the protocol sends.
+/// controller (which then follows the app lifecycle: live connection off in
+/// background), reports whether it is on screen (a hidden tab or a covered
+/// route is not, so [SunonoChatController.unread] counts) and renders
+/// everything the protocol sends.
 class SunonoChatView extends StatefulWidget {
   const SunonoChatView({
     super.key,
@@ -23,11 +25,13 @@ class SunonoChatView extends StatefulWidget {
     this.productSku,
     this.showHeader = true,
     this.onClose,
+    this.autofocus = false,
   });
 
   final SunonoChatController controller;
 
-  /// Defaults to [SunonoTheme.fromMaterial] of the ambient theme.
+  /// Defaults to the shop's dashboard color and scheme
+  /// ([SunonoTheme.fromConfig]) over [SunonoTheme.fromMaterial] of the ambient theme.
   final SunonoTheme? theme;
 
   /// Enables the photo button. Return an already-resized JPEG.
@@ -46,24 +50,28 @@ class SunonoChatView extends StatefulWidget {
   /// Shows a close button in the header (used by the bottom sheet).
   final VoidCallback? onClose;
 
+  /// Focus the composer (and raise the keyboard) when the view opens. Off by
+  /// default so switching to a Chat tab doesn't pop the keyboard.
+  final bool autofocus;
+
   @override
   State<SunonoChatView> createState() => _SunonoChatViewState();
 }
 
-class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObserver {
+class _SunonoChatViewState extends State<SunonoChatView> {
   final _input = TextEditingController();
   final _focus = FocusNode();
 
   /// The shopper tapped Send on a photo with no caption: say what is missing.
   bool _needCaption = false;
   bool _sentInitial = false;
+  bool _visible = false;
 
   SunonoChatController get _c => widget.controller;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _c.addListener(_onChange);
     _c.attach();
     _input.addListener(() => setState(() {
@@ -80,20 +88,28 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
     if (old.controller != widget.controller) {
       old.controller
         ..removeListener(_onChange)
-        ..detach();
+        ..detach(this);
       widget.controller
         ..addListener(_onChange)
         ..attach();
+      if (_visible) widget.controller.setVisible(this, true);
     }
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _c.resume();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      _c.suspend();
-    }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A StatefulShellRoute keeps hidden tabs mounted with tickers off; a
+    // route pushed on top makes this one not current.
+    // ponytail: TickerMode.valuesOf needs Flutter 3.35; the floor is 3.27.
+    // ignore: deprecated_member_use
+    final visible = TickerMode.of(context) && ModalRoute.of(context)?.isCurrent != false;
+    if (visible == _visible) return;
+    _visible = visible;
+    // After the frame: clearing unread notifies host badges, never mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _visible == visible) _c.setVisible(this, visible);
+    });
   }
 
   void _onChange() {
@@ -106,10 +122,9 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _c
       ..removeListener(_onChange)
-      ..detach();
+      ..detach(this);
     _input.dispose();
     _focus.dispose();
     super.dispose();
@@ -146,7 +161,8 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
 
   @override
   Widget build(BuildContext context) {
-    final theme = widget.theme ?? SunonoTheme.fromMaterial(Theme.of(context));
+    final theme =
+        widget.theme ?? SunonoTheme.fromConfig(_c.config, fallback: SunonoTheme.fromMaterial(Theme.of(context)));
     final lang = _c.lang;
     final t = SunonoCopy.of(lang);
     final rtl = lang == 'ar';
@@ -237,6 +253,7 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
             onRemovePhoto: _removePhoto,
             onRetryPhoto: _c.retryPhoto,
             copy: t,
+            autofocus: widget.autofocus,
           ),
         ),
       ]);
@@ -259,6 +276,7 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
               _Header(
                 theme: theme,
                 title: _c.config.title(lang) ?? t.title,
+                avatarUrl: _c.config.avatarUrl,
                 subtitle: _c.paused ? t.humanOnline : t.online,
                 thinking: _c.busy,
                 onClose: widget.onClose,
@@ -273,9 +291,17 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
 
 class _Header extends StatelessWidget {
   const _Header(
-      {required this.theme, required this.title, required this.subtitle, required this.thinking, this.onClose});
+      {required this.theme,
+      required this.title,
+      required this.subtitle,
+      required this.thinking,
+      this.avatarUrl,
+      this.onClose});
   final SunonoTheme theme;
   final String title;
+
+  /// The shop's avatar; the orb shows while it loads or when it fails.
+  final String? avatarUrl;
   final String subtitle;
   final bool thinking;
   final VoidCallback? onClose;
@@ -284,7 +310,22 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
         child: Row(children: [
-          PresenceOrb(theme: theme, size: 40, thinking: thinking),
+          if (avatarUrl == null)
+            PresenceOrb(theme: theme, size: 40, thinking: thinking)
+          else
+            ClipOval(
+              child: Image.network(
+                avatarUrl!,
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
+                cacheWidth: (40 * MediaQuery.devicePixelRatioOf(context)).ceil(),
+                excludeFromSemantics: true,
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : PresenceOrb(theme: theme, size: 40, thinking: thinking),
+                errorBuilder: (_, __, ___) => PresenceOrb(theme: theme, size: 40, thinking: thinking),
+              ),
+            ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -460,11 +501,14 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
         ),
       ]));
     } else if (m.state == MessageState.failed) {
-      children.add(Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.error_outline_rounded, size: 18, color: theme.danger),
-        const SizedBox(width: 6),
-        Flexible(child: Text(t.error(m.errorCode), style: theme.text(size: 13, color: theme.danger))),
-      ]));
+      children.add(Semantics(
+        liveRegion: true,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.error_outline_rounded, size: 18, color: theme.danger),
+          const SizedBox(width: 6),
+          Flexible(child: Text(t.error(m.errorCode), style: theme.text(size: 13, color: theme.danger))),
+        ]),
+      ));
       children.add(Padding(
         padding: const EdgeInsets.only(top: 8),
         child: SunonoChip(
@@ -680,9 +724,11 @@ class _Composer extends StatelessWidget {
     required this.onRemovePhoto,
     required this.onRetryPhoto,
     required this.copy,
+    required this.autofocus,
   });
 
   final SunonoTheme theme;
+  final bool autofocus;
   final TextEditingController controller;
   final FocusNode focus;
   final String hint;
@@ -797,6 +843,7 @@ class _Composer extends StatelessWidget {
               child: TextField(
                 controller: controller,
                 focusNode: focus,
+                autofocus: autofocus,
                 minLines: 1,
                 maxLines: 5,
                 textInputAction: TextInputAction.send,

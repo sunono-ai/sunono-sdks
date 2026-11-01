@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -29,12 +30,14 @@ abstract final class Sunono {
   /// - [pickImage]: enables photo messages.
   /// - [starterPrompts]: replaces the empty-thread starter chips per language,
   ///   e.g. `{'ar': ['شو في جديد؟'], 'en': ["What's new?"]}`; `[]` shows none.
+  /// - [locale]: `ar` / `en`; null follows the shop's `default_language`.
+  /// - [theme]: null follows the shop's dashboard color over your Material theme.
   /// - [onIntent]: route product/cart/checkout taps; return true if handled.
   static SunonoChatController init({
     required String shopKey,
     String? appOrigin,
     String apiBaseUrl = 'https://api.sunono.ai/api',
-    String locale = 'ar',
+    String? locale,
     required SunonoStorage storage,
     SunonoCartBridge? cartBridge,
     bool nativeCheckout = false,
@@ -69,10 +72,17 @@ abstract final class Sunono {
   /// Cart changes, analytics and non-fatal errors.
   static Stream<SunonoEvent> get events => controller.events;
 
+  /// Items in the shopper's cart, for your cart badge.
+  static ValueListenable<int> get cartCount => controller.cartCount;
+
+  /// Assistant and staff messages the shopper hasn't seen, for a Chat tab badge.
+  static ValueListenable<int> get unread => controller.unread;
+
   /// Follow the app's language at runtime (`ar` / `en`).
   static void setLocale(String locale) => controller.lang = locale;
 
   /// Logout / account switch: forget this shopper's chat and cart link.
+  /// Detaches this device on the server first (best effort, a few seconds at most).
   static Future<void> reset() => controller.reset();
 
   /// After login, logout or a cart replacement (e.g. `mergeCarts`).
@@ -81,7 +91,7 @@ abstract final class Sunono {
   /// The chat as a full-height bottom sheet, e.g. from a product page:
   /// `Sunono.open(context, initialMessage: 'متوفر بمقاس 42؟')`.
   static Future<void> open(BuildContext context,
-      {String? initialMessage, String? productId, String? productSku, SunonoTheme? theme}) {
+      {String? initialMessage, String? productId, String? productSku, SunonoTheme? theme, bool autofocus = false}) {
     final c = controller;
     return showModalBottomSheet<void>(
       context: context,
@@ -102,6 +112,7 @@ abstract final class Sunono {
                 initialMessage: initialMessage,
                 productId: productId,
                 productSku: productSku,
+                autofocus: autofocus,
                 onClose: () => Navigator.of(ctx).pop(),
               ),
             ),
@@ -112,10 +123,11 @@ abstract final class Sunono {
   }
 
   /// The chat screen with the facade's photo picker and theme wired in.
-  static Widget view({SunonoTheme? theme, bool showHeader = true}) => SunonoChatView(
+  static Widget view({SunonoTheme? theme, bool showHeader = true, bool autofocus = false}) => SunonoChatView(
         controller: controller,
         theme: theme ?? _theme,
         pickImage: _pickImage,
         showHeader: showHeader,
+        autofocus: autofocus,
       );
 }

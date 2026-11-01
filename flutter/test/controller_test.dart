@@ -9,6 +9,7 @@ import 'package:sunono/sunono.dart';
 import 'fake_server.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized(); // attach() follows the app lifecycle
   late FakeServer server;
   late SunonoChatController c;
   late List<SunonoEvent> events;
