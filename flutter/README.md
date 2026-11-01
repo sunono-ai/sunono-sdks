@@ -64,7 +64,7 @@ ValueListenableBuilder<int>(
 );
 ```
 
-`unread` counts assistant and staff messages that arrive while no chat view is on screen (a hidden tab or a covered route counts as off screen) and clears when one shows. The live connection keeps running while the app is in the foreground, even with the chat hidden, and stops in the background.
+`unread` counts assistant and staff messages that arrive while no chat view is on screen (a hidden tab or a covered route counts as off screen) and clears when one shows. The live connection keeps running while the app is in the foreground, even with the chat hidden, and stops in the background. If you drive `SunonoChatController` headless (your own UI, `open()` without `attach()`), call `suspend()` / `resume()` from your app lifecycle yourself.
 
 ## Storage
 
@@ -79,7 +79,7 @@ class MySecureStorage implements SunonoStorage {
 }
 ```
 
-On **logout or account switch**, call `Sunono.reset()` so the next person never sees the previous chat or cart. It first asks the server to detach this device (best effort, a few seconds at most; retried on the next open if it fails), then clears everything local.
+On **logout or account switch**, call `Sunono.reset()` so the next person never sees the previous chat or cart. Everything local is cleared at once; the server is then asked, in the background, to detach this device (retried on the next open if it fails).
 
 ## Events
 

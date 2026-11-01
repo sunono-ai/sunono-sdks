@@ -129,6 +129,8 @@ class _Outgoing {
 /// Once a view [attach]es, the controller follows the app lifecycle itself:
 /// the live connection runs while it is open and the app is in the
 /// foreground, whether or not a view is showing, so [unread] keeps counting.
+/// A host that drives it headless ([open] without [attach]) must call
+/// [suspend] and [resume] on the app lifecycle itself.
 class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// [lang] null follows the shop's `default_language` once config loads.
   SunonoChatController({
@@ -140,7 +142,6 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     this.onIntent,
     this.starterPrompts,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
-    this.forgetTimeout = const Duration(seconds: 3),
     DateTime Function() clock = DateTime.now,
   })  : _api = api,
         _storage = storage,
@@ -177,12 +178,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// Delays between history checks while recovering (cumulative waits).
   final List<Duration> recoveryChecks;
 
-  /// The longest [reset] waits on `/chat/forget` before clearing anyway.
-  final Duration forgetTimeout;
-
-  /// A [reset] whose forget failed leaves the old shopper id here; the next
-  /// [open] retries it.
-  static const _pendingForgetKey = 'sunono.pending_forget';
+  /// The shopper a [reset] still has to detach on the server (written before
+  /// the forget is sent, removed once it lands); [open] retries it.
+  String get _pendingForgetKey => 'sunono.pending_forget.${_api.shopKey}';
+  Future<void>? _forgetting;
 
   final DateTime Function() _clock;
 
@@ -306,8 +305,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// From here on the controller follows the app lifecycle itself.
   void attach() {
     if (!_observing && !_disposed) {
-      WidgetsBinding.instance.addObserver(this);
+      final binding = WidgetsBinding.instance..addObserver(this);
       _observing = true;
+      final state = binding.lifecycleState;
+      if (state != null) _background = _isBackground(state);
     }
     _emit(const AnalyticsEvent('assistant_opened'));
     open();
@@ -335,21 +336,25 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _background = false;
       resume();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+    } else if (_isBackground(state)) {
       _background = true;
       suspend();
     }
   }
 
-  /// The live connection runs only in the foreground.
+  static bool _isBackground(AppLifecycleState s) =>
+      s == AppLifecycleState.hidden || s == AppLifecycleState.paused || s == AppLifecycleState.detached;
+
+  /// The live connection runs only in the foreground, and never for an SDK
+  /// the shop no longer supports.
   void _goLive() {
-    if (!_background) _live.start();
+    if (!_background && !updateRequired) _live.start();
   }
 
   /// A bot or staff message landed: a badge count while nothing shows the
   /// chat, else a polite screen-reader announcement.
   void _arrived(ChatMessage m) {
-    if (_disposed) return;
+    if (_disposed || updateRequired) return;
     if (_visible.isEmpty) {
       _unread.value++;
       return;
@@ -401,7 +406,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _status = ChatStatus.ready;
     _ensureTried = false;
     _changed();
-    unawaited(_retryForget());
+    _forgetPending();
+    if (updateRequired) return; // the update notice only: no cart link, no live
     unawaited(_bind(ensure: false));
     _goLive(); // fetches history first
   }
@@ -427,10 +433,17 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final fresh = await _api.config();
       if (epoch != _epoch || _disposed) return;
+      final wasBlocked = updateRequired;
       _applyConfig(fresh);
       if (!fresh.enabled) {
         _disable(fresh.disabledReason);
         return;
+      }
+      if (updateRequired) {
+        _live.stop();
+      } else if (wasBlocked) {
+        unawaited(_bind(ensure: false)); // the shop lowered its minimum: carry on
+        _goLive();
       }
       _changed();
     } catch (e, s) {
@@ -451,21 +464,24 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (_status != ChatStatus.ready) return;
     if (stale) unawaited(_refreshConfig());
+    if (updateRequired) return;
     unawaited(_bind(ensure: false));
     _goLive();
   }
 
-  /// Forget this shopper (logout / account switch): detach the device on the
-  /// server (`/chat/forget`, best effort, at most [forgetTimeout]), then clear
-  /// everything local. Anything still in flight for the old shopper is
-  /// dropped when it lands.
+  /// Forget this shopper (logout / account switch). Everything local is
+  /// cleared at once, so nothing of the old shopper can show or be sent
+  /// again; the server-side detach (`/chat/forget`) runs in the background
+  /// with the old shopper's own credentials and is retried on a later [open]
+  /// if it fails. Anything still in flight for the old shopper is dropped
+  /// when it lands.
   Future<void> reset() async {
     _epoch++;
-    removePhoto(); // before any await: nothing of the old shopper may land
+    removePhoto();
     _live.stop();
     final wasOpen = _status == ChatStatus.ready;
-    await _forget();
-    await _session.reset();
+    final oldId = _session.userId, oldToken = _session.currentToken;
+    final cleared = _session.reset(); // memory now, storage below
     _messages.clear();
     _trimmed.clear();
     _cart = null;
@@ -476,35 +492,47 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _status = ChatStatus.idle;
     if (!_disposed) _unread.value = 0;
     _changed();
-    if (wasOpen && !_disposed) await open();
-  }
-
-  Future<void> _forget() async {
     try {
-      final id = await _session.storedUserId();
-      if (id == null) return; // never used: nothing to detach
-      try {
-        await _session.authed(_api.forget).timeout(forgetTimeout);
-      } catch (_) {
+      final stored = await cleared;
+      final id = oldId ?? stored;
+      if (id != null) {
         await _storage.write(_pendingForgetKey, id);
+        _forgetPending(id: id, token: oldToken);
       }
     } catch (e, s) {
       _emit(ErrorEvent(e, s)); // storage failed: the reset still goes ahead
     }
+    if (wasOpen && !_disposed) await open();
   }
 
-  /// A forget a [reset] couldn't deliver: once more for that old shopper.
-  Future<void> _retryForget() async {
+  /// Send the pending forget, if any (single-flight). [token] is used only
+  /// when the pending shopper is [id]; otherwise it is re-inited by its own id.
+  void _forgetPending({String? id, String? token}) {
+    _forgetting ??= _runForget(id, token).whenComplete(() => _forgetting = null);
+  }
+
+  Future<void> _runForget(String? id, String? token) async {
     try {
       final old = await _storage.read(_pendingForgetKey);
       if (old == null) return;
       try {
-        await _api.forget((await _api.init(old)).token);
+        // Never through the session: its token and re-init are the NEW shopper's.
+        var done = false;
+        if (old == id && token != null) {
+          try {
+            await _api.forget(token);
+            done = true;
+          } on SunonoHttpException catch (e) {
+            if (!e.isAuth) rethrow; // an expired token: re-init as the old shopper below
+          }
+        }
+        if (!done) await _api.forget((await _api.init(old)).token);
       } on SunonoHttpException catch (e) {
         // 429 or 5xx: try on a later open. Any other refusal won't change.
         if (e.status == 429 || e.status >= 500) return;
       }
-      await _storage.delete(_pendingForgetKey);
+      // A newer reset may have queued another shopper meanwhile: keep that one.
+      if (await _storage.read(_pendingForgetKey) == old) await _storage.delete(_pendingForgetKey);
     } catch (_) {
       // offline: try on a later open
     }
@@ -614,7 +642,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> send(String text,
       {bool synthetic = false, String? productId, String? productSku, ({String action, String ref})? tap}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || _busy || _status != ChatStatus.ready) return;
+    if (trimmed.isEmpty || _busy || _status != ChatStatus.ready || updateRequired) return;
     final state = _photo.value;
     final typed = !synthetic && tap == null;
     if (typed && (state is PhotoUploading || (state is PhotoFailed && state.retryable))) return;

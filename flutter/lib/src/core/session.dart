@@ -40,6 +40,9 @@ class Session {
   }
 
   Future<String> _loadId(int gen) async {
+    try {
+      await _clearing; // never read back the id a reset is deleting
+    } catch (_) {}
     var id = await _storage.read(_key);
     if (id == null || !_uuid.hasMatch(id)) {
       id = uuidV4();
@@ -49,12 +52,8 @@ class Session {
     return id;
   }
 
-  /// The shopper id in memory or storage, without minting one.
-  Future<String?> storedUserId() async {
-    if (_userId != null) return _userId;
-    final id = await _storage.read(_key);
-    return id != null && _uuid.hasMatch(id) ? id : null;
-  }
+  /// The current token, if one was fetched (for a forget after [reset]).
+  String? get currentToken => _token;
 
   /// A valid token; [force] re-inits (after a 401/422).
   Future<String> token({bool force = false}) {
@@ -96,13 +95,23 @@ class Session {
   }
 
   /// Forget the shopper (logout / account switch): next use mints a new one.
-  Future<void> reset() async {
+  /// Memory is cleared before this returns; the future resolves to the id that
+  /// was stored (null when none) once it is deleted.
+  Future<String?> reset() {
     _gen++;
     _userId = null;
     _token = null;
     _pending = null;
     _idPending = null;
+    return _clearing = _clear();
+  }
+
+  Future<void>? _clearing;
+
+  Future<String?> _clear() async {
+    final id = await _storage.read(_key);
     await _storage.delete(_key);
+    return id != null && _uuid.hasMatch(id) ? id : null;
   }
 }
 

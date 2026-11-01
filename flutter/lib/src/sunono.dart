@@ -82,7 +82,7 @@ abstract final class Sunono {
   static void setLocale(String locale) => controller.lang = locale;
 
   /// Logout / account switch: forget this shopper's chat and cart link.
-  /// Detaches this device on the server first (best effort, a few seconds at most).
+  /// Clears everything local at once; the server-side detach runs in the background.
   static Future<void> reset() => controller.reset();
 
   /// After login, logout or a cart replacement (e.g. `mergeCarts`).

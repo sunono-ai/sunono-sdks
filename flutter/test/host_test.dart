@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:sunono/sunono.dart';
 import 'package:sunono/src/ui/cards.dart';
+import 'package:sunono/src/ui/theme.dart' show contrastRatio;
 
 import 'fake_server.dart';
 
@@ -16,7 +17,7 @@ void main() {
   late SunonoChatController c;
   late List<SunonoEvent> events;
 
-  SunonoChatController make({SunonoStorage? storage, String? lang, Duration? forgetTimeout}) {
+  SunonoChatController make({SunonoStorage? storage, String? lang, DateTime Function()? clock}) {
     final ctl = SunonoChatController(
       api: SunonoApi(
         shopKey: 'pk_test',
@@ -27,7 +28,7 @@ void main() {
       storage: storage ?? MemoryStorage(),
       lang: lang,
       recoveryChecks: const [Duration(milliseconds: 5)],
-      forgetTimeout: forgetTimeout ?? const Duration(seconds: 3),
+      clock: clock ?? DateTime.now,
     );
     ctl.events.listen(events.add);
     return ctl;
@@ -168,28 +169,119 @@ void main() {
       expect(dark.surface.computeLuminance(), lessThan(0.1));
       expect(dark.onSurface.computeLuminance(), greaterThan(0.7));
     });
+
+    test('contrast: a dark brand on the dark scheme reads as text; fills keep the brand', () {
+      final t = SunonoTheme.fromConfig(const ShopConfig(primaryColor: Color(0xFF57227D), colorScheme: 'dark'),
+          fallback: const SunonoTheme());
+      expect(t.primary, const Color(0xFF57227D), reason: 'fills keep the brand');
+      expect(contrastRatio(t.primary, t.surface), lessThan(4.5), reason: 'the case being fixed');
+      expect(contrastRatio(t.primaryText, t.surface), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(t.primaryText, t.background), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(t.onPrimary, t.primary), greaterThanOrEqualTo(4.5));
+    });
+
+    test('contrast: a light brand color gets dark text on its fills and darker text on white', () {
+      final t =
+          SunonoTheme.fromConfig(const ShopConfig(primaryColor: Color(0xFFFFE066)), fallback: const SunonoTheme());
+      expect(t.onPrimary.computeLuminance(), lessThan(0.1));
+      expect(contrastRatio(t.onPrimary, t.primary), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(t.primaryText, t.surface), greaterThanOrEqualTo(4.5));
+    });
+
+    test('fromMaterial: onPrimary is the scheme onPrimary', () {
+      final m = ThemeData(colorSchemeSeed: const Color(0xFFFFE066));
+      expect(SunonoTheme.fromMaterial(m).onPrimary, m.colorScheme.onPrimary);
+    });
+
+    testWidgets('the user bubble and the send button use onPrimary', (tester) async {
+      server.config = {'enabled': true, 'primary_color': '#FFE066'};
+      await tester.pumpWidget(MaterialApp(
+          home: MediaQuery(
+              data: const MediaQueryData(disableAnimations: true, size: Size(400, 800)),
+              child: Scaffold(body: SunonoChatView(controller: c)))));
+      for (var i = 0; i < 20; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      final icon = tester.widget<Icon>(find.byIcon(Icons.arrow_upward_rounded));
+      expect(icon.color!.computeLuminance(), lessThan(0.1), reason: 'dark on a light brand');
+      await tester.pumpWidget(const SizedBox());
+      c.suspend();
+    });
   });
 
-  test('min SDK version: assistant_update_required once, however often config is fetched', () async {
-    server.config = {
+  group('min SDK version', () {
+    final old = {
       'enabled': true,
       'app': {'min_sdk_version': '99.0.0'},
     };
-    await c.open();
-    expect(c.updateRequired, isTrue);
-    c.suspend();
-    await c.reset(); // open → config again
-    expect(server.count('/widget/config'), 2);
-    expect(analytics().where((n) => n == 'assistant_update_required'), hasLength(1));
+
+    test('assistant_update_required once, however often config is fetched', () async {
+      server.config = old;
+      await c.open();
+      expect(c.updateRequired, isTrue);
+      await c.reset(); // open → config again
+      expect(server.count('/widget/config'), 2);
+      expect(analytics().where((n) => n == 'assistant_update_required'), hasLength(1));
+    });
+
+    test('an unsupported SDK binds no cart, never goes live, counts nothing, sends nothing', () async {
+      var now = DateTime(2026, 1, 1);
+      server.config = old;
+      c.dispose();
+      c = make(clock: () => now);
+      c.attach();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      c.resume();
+      await c.send('hi');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.count('/chat/subscribe-ticket'), 0);
+      expect(server.count('/chat/history'), 0);
+      expect(server.count('/chat'), 0);
+      expect(c.unread.value, 0);
+
+      server.config = {'enabled': true}; // the shop lowered its minimum
+      now = now.add(const Duration(seconds: 61));
+      c.resume();
+      await server.until(() => server.live != null);
+      expect(c.updateRequired, isFalse);
+    });
+  });
+
+  group('app lifecycle', () {
+    tearDown(() => TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+
+    for (final state in [AppLifecycleState.hidden, AppLifecycleState.paused]) {
+      test('attach while the app is ${state.name}: no live until it comes back', () async {
+        TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(state);
+        c.attach();
+        await server.until(() => c.status == ChatStatus.ready);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(server.count('/chat/subscribe-ticket'), 0);
+        TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await server.until(() => server.live != null);
+      });
+    }
+
+    test('hidden stops the live connection', () async {
+      c.attach();
+      await server.until(() => server.live != null);
+      c.didChangeAppLifecycleState(AppLifecycleState.hidden);
+      server.pushLive('message.new', staff('s1'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(c.messages, isEmpty);
+    });
   });
 
   group('reset forgets the device', () {
-    test('forget goes out with the old shopper token before anything is cleared', () async {
+    const pendingKey = 'sunono.pending_forget.pk_test';
+
+    test('forget goes out with the old shopper token; the new shopper differs', () async {
       await c.open();
       await server.until(() => server.live != null);
       final old = c.userId;
       await c.reset();
-      expect(server.count('/chat/forget'), 1);
+      await server.until(() => server.count('/chat/forget') == 1);
       final forget = server.requests.singleWhere((r) => r.url.path.endsWith('/chat/forget'));
       expect(forget.headers['Authorization'], 'Bearer tok1', reason: "the old shopper's token");
       expect(server.bodies['/chat/forget']!.single, '{}');
@@ -197,48 +289,102 @@ void main() {
       expect(c.userId, isNot(old));
     });
 
-    test('a failed forget is kept and retried on the next open, then dropped', () async {
+    test('nothing of the old shopper restarts while its forget is held', () async {
+      final storage = MemoryStorage();
+      c.dispose();
+      c = make(storage: storage);
+      await c.open();
+      await server.until(() => server.live != null);
+      final old = c.userId;
+      final gate = Completer<void>();
+      server.beforeForget = () => gate.future;
+      final mark = server.requests.length;
+      final resetting = c.reset();
+      c.didChangeAppLifecycleState(AppLifecycleState.resumed); // a resume races the reset
+      unawaited(c.send('for the old thread'));
+      await resetting; // never waits on the network forget
+      await server.until(() => server.count('/chat/forget') == 1);
+      c.didChangeAppLifecycleState(AppLifecycleState.resumed); // and one during the held forget
+      await server.until(() => server.count('/chat/subscribe?') == 2); // the new shopper went live
+      expect(await storage.read(pendingKey), old, reason: 'pending until the forget lands');
+      gate.complete();
+      for (var i = 0; i < 100 && await storage.read(pendingKey) != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(await storage.read(pendingKey), isNull);
+
+      final after = server.requests.skip(mark).toList();
+      for (final r in after) {
+        final auth = r.headers['Authorization'];
+        if (r.url.path.endsWith('/chat/forget')) {
+          expect(auth, 'Bearer tok1', reason: 'the forget is the old shopper');
+        } else {
+          expect(auth, isNot('Bearer tok1'), reason: '${r.url.path} must be the new shopper');
+        }
+      }
+      expect(after.where((r) => r.url.path.endsWith('/chat')), isEmpty, reason: 'the send was dropped');
+      final inits = server.bodies['/shops/init']!.skip(1).map((b) => jsonDecode(b)['user_id']);
+      expect(inits, isNot(contains(old)), reason: 'the new session never re-inits the old id');
+    });
+
+    test('an expired old token: the forget re-inits as the old shopper, never the new one', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final old = c.userId;
+      server.failForgetTimes = 1;
+      server.failForgetWith = 401;
+      await c.reset();
+      await server.until(() => server.count('/chat/forget') == 2);
+      expect(server.requests.where((r) => r.url.path.endsWith('/chat/forget')).last.headers['Authorization'],
+          isNot('Bearer tok1'));
+      expect(server.bodies['/shops/init']!.where((b) => jsonDecode(b)['user_id'] == old), hasLength(2));
+    });
+
+    test('a failed forget is kept per shop and retried on the next open, then dropped', () async {
       final storage = MemoryStorage();
       c.dispose();
       c = make(storage: storage);
       await c.open();
       await server.until(() => server.live != null);
       final old = c.userId!;
-      server.failForgetTimes = 2; // the reset's forget and the reopen's retry
+      server.failForgetTimes = 1000;
       await c.reset();
-      await server.until(() => server.count('/chat/forget') == 2);
-      expect(await storage.read('sunono.pending_forget'), old);
+      await server.until(() => server.count('/chat/forget') >= 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(await storage.read(pendingKey), old);
+      expect(await storage.read('sunono.pending_forget'), isNull, reason: 'keyed per shop');
 
       c.dispose();
+      server.failForgetTimes = 0;
+      final before = server.count('/chat/forget');
       c = make(storage: storage); // next cold start
       await c.open();
-      await server.until(() => server.count('/chat/forget') == 3);
-      for (var i = 0; i < 100 && await storage.read('sunono.pending_forget') != null; i++) {
+      await server.until(() => server.count('/chat/forget') == before + 1);
+      for (var i = 0; i < 100 && await storage.read(pendingKey) != null; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 5));
       }
-      expect(await storage.read('sunono.pending_forget'), isNull);
-      final asOld = server.bodies['/shops/init']!.where((b) => jsonDecode(b)['user_id'] == old);
-      expect(asOld, hasLength(3), reason: 'first use, then one re-init per retry');
+      expect(await storage.read(pendingKey), isNull);
+      expect(server.bodies['/shops/init']!.where((b) => jsonDecode(b)['user_id'] == old).length, greaterThan(1),
+          reason: 'the retry re-inits as the old shopper');
     });
 
-    test('a hanging forget never holds reset past forgetTimeout', () async {
+    test('a retry leaves a newer pending shopper in place', () async {
       final storage = MemoryStorage();
+      await storage.write(pendingKey, '11111111-1111-4111-8111-111111111111');
       c.dispose();
-      c = make(storage: storage, forgetTimeout: const Duration(milliseconds: 50));
+      c = make(storage: storage);
+      server.beforeForget = () async {
+        await storage.write(pendingKey, '22222222-2222-4222-8222-222222222222'); // a reset meanwhile
+      };
       await c.open();
-      await server.until(() => server.live != null);
-      final old = c.userId;
-      final gate = Completer<void>();
-      server.beforeForget = () => gate.future;
-      final sw = Stopwatch()..start();
-      await c.reset();
-      expect(sw.elapsed, lessThan(const Duration(seconds: 2)));
-      expect(await storage.read('sunono.pending_forget'), old);
-      gate.complete();
+      await server.until(() => server.count('/chat/forget') == 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(await storage.read(pendingKey), '22222222-2222-4222-8222-222222222222');
     });
 
     test('a controller never used sends no forget', () async {
       await c.reset();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(server.count('/chat/forget'), 0);
       expect(server.count('/shops/init'), 0);
     });

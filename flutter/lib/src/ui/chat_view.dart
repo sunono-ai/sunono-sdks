@@ -481,7 +481,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
                 ),
               ),
               child: _BubbleText(
-                  text: m.text, theme: theme, color: Colors.white, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
+                  text: m.text, theme: theme, color: theme.onPrimary, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
             ),
             time(AlignmentDirectional.centerEnd),
           ]),
@@ -645,7 +645,7 @@ class _BubbleText extends StatelessWidget {
           onTap: () => onLink(url),
           child: Text(url,
               textDirection: TextDirection.ltr,
-              style: style.copyWith(decoration: TextDecoration.underline, color: color ?? theme.primary)),
+              style: style.copyWith(decoration: TextDecoration.underline, color: color ?? theme.primaryText)),
         ),
       ));
       last = m.start + url.length;
@@ -837,7 +837,7 @@ class _Composer extends StatelessWidget {
               IconButton(
                 onPressed: onAttach,
                 tooltip: copy.attachPhoto,
-                icon: Icon(Icons.add_photo_alternate_outlined, color: theme.primary),
+                icon: Icon(Icons.add_photo_alternate_outlined, color: theme.primaryText),
               ),
             Expanded(
               child: TextField(
@@ -871,7 +871,7 @@ class _Composer extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(gradient: theme.brandGradient, shape: BoxShape.circle),
-                    child: Icon(Icons.arrow_upward_rounded, color: Colors.white, textDirection: TextDirection.ltr),
+                    child: Icon(Icons.arrow_upward_rounded, color: theme.onPrimary, textDirection: TextDirection.ltr),
                   ),
                 ),
               ),

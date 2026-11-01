@@ -17,7 +17,9 @@ class SunonoTheme {
     this.danger = const Color(0xFFD83A5F),
     this.fontFamily,
     this.radius = 20,
-  });
+    this.onPrimary = Colors.white,
+    Color? primaryText,
+  }) : primaryText = primaryText ?? primary;
 
   /// Derive from the host app's theme. [accent] defaults to the scheme's
   /// tertiary color (pass your brand's second color, e.g. gold).
@@ -32,6 +34,7 @@ class SunonoTheme {
       muted: c.onSurfaceVariant,
       danger: c.error,
       fontFamily: t.textTheme.bodyMedium?.fontFamily,
+      onPrimary: c.onPrimary,
     );
   }
 
@@ -41,12 +44,19 @@ class SunonoTheme {
   factory SunonoTheme.fromConfig(ShopConfig config, {required SunonoTheme fallback}) {
     final primary = config.primaryColor ?? fallback.primary;
     final dark = config.colorScheme == 'dark';
+    final surface = dark ? const Color(0xFF1F1D26) : fallback.surface;
     return SunonoTheme(
       primary: primary,
+      onPrimary: config.primaryColor == null
+          ? fallback.onPrimary
+          : ThemeData.estimateBrightnessForColor(primary) == Brightness.dark
+              ? Colors.white
+              : const Color(0xFF1C1B22),
+      primaryText: readableOn(primary, surface),
       accent: fallback.accent,
       background:
           dark ? Color.alphaBlend(primary.withValues(alpha: 0.05), const Color(0xFF131218)) : fallback.background,
-      surface: dark ? const Color(0xFF1F1D26) : fallback.surface,
+      surface: surface,
       onSurface: dark ? const Color(0xFFECEAF2) : fallback.onSurface,
       muted: dark ? const Color(0xFFA9A5B4) : fallback.muted,
       success: dark ? const Color(0xFF3DD69A) : fallback.success,
@@ -57,6 +67,13 @@ class SunonoTheme {
   }
 
   final Color primary;
+
+  /// Text and icons on [primary] fills and the brand gradient.
+  final Color onPrimary;
+
+  /// [primary] as text or an icon on [surface]/[background]: the brand color,
+  /// shifted only as far as it must be to read (4.5:1).
+  final Color primaryText;
   final Color accent;
   final Color background;
   final Color surface;
@@ -93,5 +110,24 @@ class SunonoTheme {
         danger: danger,
         fontFamily: fontFamily ?? this.fontFamily,
         radius: radius,
+        onPrimary: onPrimary,
+        primaryText: primary == null ? primaryText : null,
       );
+}
+
+/// WCAG contrast ratio of two colors (1..21).
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  return (la > lb ? la + 0.05 : lb + 0.05) / (la > lb ? lb + 0.05 : la + 0.05);
+}
+
+/// [color] moved toward white (dark [surface]) or black (light) just until
+/// it reaches 4.5:1 against [surface].
+Color readableOn(Color color, Color surface) {
+  final target = surface.computeLuminance() < 0.5 ? Colors.white : Colors.black;
+  for (var t = 0.0; t <= 1; t += 0.05) {
+    final c = Color.lerp(color, target, t)!;
+    if (contrastRatio(c, surface) >= 4.5) return c;
+  }
+  return target;
 }

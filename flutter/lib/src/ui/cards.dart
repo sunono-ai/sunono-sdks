@@ -191,7 +191,7 @@ class ProductTile extends StatelessWidget {
                       _ltr(Text('${from ? '${SunonoCopy.of(lang).from} ' : ''}${formatJod(price, lang)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.text(size: 14, weight: FontWeight.w700, color: theme.primary))),
+                          style: theme.text(size: 14, weight: FontWeight.w700, color: theme.primaryText))),
                       if (struck != null)
                         _ltr(Text(formatJod(struck, lang),
                             maxLines: 1,
@@ -331,17 +331,17 @@ class _AddButton extends StatelessWidget {
                   if (spinning)
                     // Reduce motion: a still glyph instead of a spinner.
                     MediaQuery.disableAnimationsOf(context)
-                        ? const Icon(Icons.hourglass_top_rounded, size: 15, color: Colors.white)
-                        : const SizedBox.square(
-                            dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? Icon(Icons.hourglass_top_rounded, size: 15, color: theme.onPrimary)
+                        : SizedBox.square(
+                            dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: theme.onPrimary))
                   else
-                    const Icon(Icons.add_shopping_cart_rounded, size: 15, color: Colors.white),
+                    Icon(Icons.add_shopping_cart_rounded, size: 15, color: theme.onPrimary),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.text(size: 12, weight: FontWeight.w600, color: Colors.white)),
+                        style: theme.text(size: 12, weight: FontWeight.w600, color: theme.onPrimary)),
                   ),
                 ]),
               ),
@@ -369,8 +369,9 @@ class SunonoChip extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (icon != null) ...[Icon(icon, size: 16, color: theme.primary), const SizedBox(width: 6)],
-              Flexible(child: Text(label, style: theme.text(size: 13, weight: FontWeight.w600, color: theme.primary))),
+              if (icon != null) ...[Icon(icon, size: 16, color: theme.primaryText), const SizedBox(width: 6)],
+              Flexible(
+                  child: Text(label, style: theme.text(size: 13, weight: FontWeight.w600, color: theme.primaryText))),
             ]),
           ),
         ),
@@ -401,9 +402,10 @@ class HandoffButton extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700, color: Colors.white))),
+                Flexible(
+                    child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700, color: theme.onPrimary))),
                 const SizedBox(width: 8),
-                const Icon(Icons.arrow_forward_rounded, size: 18, color: Colors.white),
+                Icon(Icons.arrow_forward_rounded, size: 18, color: theme.onPrimary),
               ]),
             ),
           ),
@@ -434,9 +436,9 @@ class CartBar extends StatelessWidget {
       decoration: BoxDecoration(color: theme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
       clipBehavior: Clip.antiAlias,
       child: last?.imageUrl == null
-          ? Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primary)
+          ? Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primaryText)
           : boundedNetworkImage(context, last!.imageUrl!,
-              width: 32, fallback: () => Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primary)),
+              width: 32, fallback: () => Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primaryText)),
     );
     return Semantics(
       button: true,
@@ -473,7 +475,7 @@ class CartBar extends StatelessWidget {
                   Flexible(
                     child: Text(formatFils(cart.totalFils, lang),
                         textAlign: TextAlign.end,
-                        style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primary)),
+                        style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primaryText)),
                   ),
                 ],
                 const SizedBox(width: 4),
@@ -570,7 +572,7 @@ class CheckoutCardView extends StatelessWidget {
                       ? Icons.edit_outlined
                       : Icons.receipt_long_rounded,
               size: 18,
-              color: placed ? theme.success : theme.primary),
+              color: placed ? theme.success : theme.primaryText),
           const SizedBox(width: 8),
           Expanded(child: Text(title, style: theme.text(size: 14, weight: FontWeight.w700))),
         ]),
@@ -621,7 +623,8 @@ class CheckoutCardView extends StatelessWidget {
           const SizedBox(width: 8),
           Flexible(
             child: Text(value,
-                textAlign: TextAlign.end, style: theme.text(size: 15, weight: FontWeight.w800, color: theme.primary)),
+                textAlign: TextAlign.end,
+                style: theme.text(size: 15, weight: FontWeight.w800, color: theme.primaryText)),
           ),
         ]),
       );
