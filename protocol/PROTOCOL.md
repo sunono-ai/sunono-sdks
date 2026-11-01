@@ -332,6 +332,8 @@ The server decides per turn. Clients render whatever arrives.
 
 The `done` frame and a live `message.new` for the same bot reply share `msg_ref` and may arrive in either order. The result must be exactly one bubble.
 
+**Product cards come from the turn, not the live stream.** Cards (with `sku`) arrive in the `/chat` response or the `/chat/stream` `done` frame. A live `message.new` carries text only (no cards, no `sku`), so when the `done` copy and the live copy are merged, keep the cards from the turn.
+
 ### `GET /shops/{shop}/chat/cart` (Bearer)
 Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on chat open/resume when `cart_linked`.
 

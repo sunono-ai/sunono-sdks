@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 import 'sse.dart';
 
-const sdkVersion = '0.1.0-dev.1';
+const sdkVersion = '0.2.0';
 
 /// The server answered with an error status (PROTOCOL §4, §8, §9).
 class SunonoHttpException implements Exception {
