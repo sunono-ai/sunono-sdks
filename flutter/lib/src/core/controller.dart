@@ -13,6 +13,9 @@ import 'sse.dart';
 /// The server refuses larger photos (`413 image_too_large`).
 const _maxPhotoBytes = 10 * 1024 * 1024;
 
+/// The server signs an `image_ref` for about an hour; refresh before that.
+const _imageRefMaxAge = Duration(minutes: 55);
+
 /// JPEG, PNG or WebP by magic bytes (the filename and the host's word don't count).
 bool _isSupportedImage(List<int> b) {
   bool at(int i, List<int> sig) {
@@ -95,7 +98,8 @@ class ChatMessage {
 }
 
 class _Outgoing {
-  _Outgoing(this.text, this.synthetic, this.imageRef, this.productId, this.productSku, this.tap, this.user);
+  _Outgoing(this.text, this.synthetic, this.image, this.imageRef, this.imageReadyAt, this.productId, this.productSku,
+      this.tap, this.user);
 
   /// Minted once per message and reused by every retry, so the server can
   /// answer a repeat with the stored reply instead of running the turn twice.
@@ -103,8 +107,13 @@ class _Outgoing {
   final String text;
   final bool synthetic;
 
-  /// The uploaded photo's `image_ref`; a retry of the turn reuses it.
-  final String? imageRef;
+  /// The photo, kept so an expired `image_ref` can be re-uploaded.
+  final SunonoImage? image;
+
+  /// The uploaded photo's `image_ref`; a retry of the turn reuses it while it
+  /// is fresh (the server signs refs for about an hour).
+  String? imageRef;
+  DateTime? imageReadyAt;
   final String? productId;
   final String? productSku;
   final ({String action, String ref})? tap;
@@ -199,6 +208,7 @@ class SunonoChatController extends ChangeNotifier {
   int _epoch = 0;
   int _views = 0;
   Completer<String?>? _recoverWake;
+  DateTime? _photoReadyAt;
   final _photo = ValueNotifier<PhotoState>(const PhotoIdle());
   SunonoImage? _photoImage;
   int _photoGen = 0;
@@ -350,9 +360,9 @@ class SunonoChatController extends ChangeNotifier {
   /// flight for the old shopper is dropped when it lands.
   Future<void> reset() async {
     _epoch++;
+    removePhoto(); // before any await: nothing of the old shopper may land
     _live.stop();
     await _session.reset();
-    removePhoto();
     _messages.clear();
     _trimmed.clear();
     _cart = null;
@@ -470,14 +480,17 @@ class SunonoChatController extends ChangeNotifier {
     if (trimmed.isEmpty || _busy || _status != ChatStatus.ready) return;
     final state = _photo.value;
     final typed = !synthetic && tap == null;
-    if (typed && (state is PhotoUploading || state is PhotoFailed)) return;
+    if (typed && (state is PhotoUploading || (state is PhotoFailed && state.retryable))) return;
     final image = typed && state is PhotoReady ? _photoImage : null;
     final ref = typed && state is PhotoReady ? state.ref : null;
-    if (ref != null) _clearPhoto();
+    final readyAt = _photoReadyAt;
+    // The photo is consumed by a send; one that can never upload is dropped
+    // (the shopper typed the question anyway: "tell me in words").
+    if (typed && state is! PhotoIdle) _clearPhoto();
     final user = ChatMessage(id: _id(), role: ChatRole.user, text: trimmed, localImage: image?.bytes);
     _messages.add(user);
     _emit(AnalyticsEvent('assistant_message_sent', {'synthetic': synthetic, 'photo': ref != null}));
-    await _run(_Outgoing(trimmed, synthetic, ref, productId, productSku, tap, user));
+    await _run(_Outgoing(trimmed, synthetic, image, ref, readyAt, productId, productSku, tap, user));
   }
 
   // ------------------------------------------------------------------ photo
@@ -490,6 +503,7 @@ class SunonoChatController extends ChangeNotifier {
 
   /// Attach [image] and start uploading it now (PROTOCOL §9). Resolves when
   /// the upload ends; [photo] carries the outcome. Replaces any earlier photo.
+  /// A ref older than 55 minutes is uploaded again at send time.
   Future<void> attachPhoto(SunonoImage image) {
     _photoImage = image;
     return _uploadPhoto();
@@ -531,10 +545,14 @@ class SunonoChatController extends ChangeNotifier {
           .authed((t) => _api.upload(t, image.bytes, filename: image.filename, abort: abort.future, onProgress: (p) {
                 if (current()) _photo.value = PhotoUploading(p);
               }));
-      if (current()) _photo.value = PhotoReady(ref);
+      if (!current()) return;
+      _photoReadyAt = _clock();
+      _photo.value = PhotoReady(ref);
     } catch (e, s) {
       if (!current()) return; // removed or replaced meanwhile
-      if (e is SunonoHttpException && !e.isPlatformDisabled) {
+      if (e is SunonoHttpException && e.isPlatformDisabled) {
+        _clearPhoto(); // the session already switched the chat off
+      } else if (e is SunonoHttpException) {
         _photo.value = PhotoFailed(switch (e.status) { 429 => 'rate_limited', _ => e.code ?? 'http_${e.status}' });
       } else {
         _emit(ErrorEvent(e, s));
@@ -603,6 +621,24 @@ class SunonoChatController extends ChangeNotifier {
   }
 
   Future<TurnResult> _photoTurn(_Outgoing out, ChatMessage bot) async {
+    if (_clock().difference(out.imageReadyAt!) > _imageRefMaxAge) await _reupload(out);
+    try {
+      return await _photoStream(out, bot);
+    } on SunonoHttpException catch (e) {
+      // 400 is refused before any work (an expired or unknown image_ref): the
+      // same client_message_id is safe to send again with a fresh upload.
+      if (e.status != 400) rethrow;
+      await _reupload(out);
+      return _photoStream(out, bot);
+    }
+  }
+
+  Future<void> _reupload(_Outgoing out) async {
+    out.imageRef = await _session.authed((t) => _api.upload(t, out.image!.bytes, filename: out.image!.filename));
+    out.imageReadyAt = _clock();
+  }
+
+  Future<TurnResult> _photoStream(_Outgoing out, ChatMessage bot) {
     return _session.authed((t) async {
       TurnResult? done;
       await for (final SseFrame f in _api.chatStream(t, out.text,

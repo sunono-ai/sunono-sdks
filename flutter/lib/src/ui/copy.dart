@@ -37,6 +37,7 @@ class SunonoCopy {
         'invalid_image' => _t('ما قدرنا نفتح هالصورة', "We couldn't open that photo"),
         'image_unavailable' =>
           _t('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام', "Photos aren't available right now — tell me in words"),
+        'customer_blocked' => _t('ما بنقدر نستقبل صور هلّق', "We can't accept photos right now"),
         'image_blocked' => _t('ما بنقدر نستخدم هالصورة', "We can't use that photo"),
         _ => _t('ما وصلت الرسالة', "The message didn't go through"),
       };
@@ -49,14 +50,11 @@ class SunonoCopy {
         'image_too_large' ||
         'invalid_image' ||
         'image_blocked' ||
-        'image_unavailable' =>
+        'image_unavailable' ||
+        'customer_blocked' =>
           error(code),
         _ => _t('ما قدرنا نرفع الصورة', "We couldn't upload that photo"),
       };
-
-  /// A different photo would be needed: retrying the same one fails the same way.
-  bool photoRetryable(String code) =>
-      !const {'image_too_large', 'invalid_image', 'image_blocked', 'customer_blocked'}.contains(code);
 
   String uploadingPhoto(int percent) => _t('عم نرفع الصورة $percent%', 'Uploading photo $percent%');
 

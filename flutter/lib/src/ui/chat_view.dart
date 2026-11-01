@@ -132,12 +132,11 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
     final text = _input.text.trim();
     if (_c.busy || _c.status != ChatStatus.ready) return;
     final photo = _c.photo.value;
-    if (photo is! PhotoIdle) {
-      if (photo is! PhotoReady) return; // still uploading, or failed (shown under the preview)
-      if (text.isEmpty) {
-        setState(() => _needCaption = true);
-        return;
-      }
+    // Uploading, or failed in a way a retry can fix: wait (the error is under the preview).
+    if (photo is PhotoUploading || (photo is PhotoFailed && photo.retryable)) return;
+    if (photo is PhotoReady && text.isEmpty) {
+      setState(() => _needCaption = true);
+      return;
     }
     if (text.isEmpty) return;
     _c.send(text);
@@ -224,7 +223,12 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
             hint: photo is PhotoIdle ? t.inputHint : t.photoCaptionHint,
             canSend: !_c.busy &&
                 _c.status == ChatStatus.ready &&
-                (photo is PhotoIdle ? _input.text.trim().isNotEmpty : photo is PhotoReady),
+                switch (photo) {
+                  PhotoReady() => true, // an empty caption shows the hint instead of sending
+                  PhotoUploading() => false,
+                  PhotoFailed(:final retryable) => !retryable && _input.text.trim().isNotEmpty,
+                  PhotoIdle() => _input.text.trim().isNotEmpty,
+                },
             onSend: _send,
             onAttach: widget.pickImage == null ? null : _attach,
             photo: photo,
@@ -756,7 +760,7 @@ class _Composer extends StatelessWidget {
                 ]),
               ),
             ),
-            if (photo case PhotoFailed(:final code))
+            if (photo case PhotoFailed(:final code, :final retryable))
               Padding(
                 padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 10, 4),
                 child: Align(
@@ -765,7 +769,7 @@ class _Composer extends StatelessWidget {
                     liveRegion: true,
                     child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
                       Text(copy.photoError(code), style: theme.text(size: 13, color: theme.danger)),
-                      if (copy.photoRetryable(code)) TextButton(onPressed: onRetryPhoto, child: Text(copy.retry)),
+                      if (retryable) TextButton(onPressed: onRetryPhoto, child: Text(copy.retry)),
                     ]),
                   ),
                 ),

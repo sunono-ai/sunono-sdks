@@ -68,6 +68,17 @@ class PhotoReady extends PhotoState {
 class PhotoFailed extends PhotoState {
   const PhotoFailed(this.code);
   final String code;
+
+  /// False when the same photo would fail the same way (too large, unreadable,
+  /// refused, photos unavailable, customer blocked): only a different photo or
+  /// plain text helps, and a typed send then goes out without the photo.
+  bool get retryable => !const {
+        'image_too_large',
+        'invalid_image',
+        'image_blocked',
+        'image_unavailable',
+        'customer_blocked'
+      }.contains(code);
 }
 
 /// Navigation the assistant hands back to the host app.

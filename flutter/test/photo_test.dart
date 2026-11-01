@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sunono/sunono.dart';
 
@@ -13,24 +14,55 @@ Uint8List _jpeg([int n = 64]) => Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, ...
 Uint8List _png() => Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]);
 Uint8List _webp() => Uint8List.fromList([...'RIFF'.codeUnits, 1, 2, 3, 4, ...'WEBP'.codeUnits, 9]);
 
+/// Records whether it carried an upload and whether it was closed (= aborted).
+class _Tracked extends http.BaseClient {
+  _Tracked(this.inner);
+  final http.Client inner;
+  bool upload = false;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (request.url.path.endsWith('/chat/upload')) upload = true;
+    return inner.send(request);
+  }
+
+  @override
+  void close() {
+    closed = true;
+    inner.close();
+  }
+}
+
 void main() {
   late FakeServer server;
   late SunonoChatController c;
+  late List<_Tracked> clients;
 
-  SunonoChatController make({Duration? timeout}) => SunonoChatController(
+  _Tracked track(http.Client inner) {
+    final k = _Tracked(inner);
+    clients.add(k);
+    return k;
+  }
+
+  bool uploadClientClosed() => clients.where((k) => k.upload).every((k) => k.closed) && clients.any((k) => k.upload);
+
+  SunonoChatController make({Duration? timeout, DateTime Function()? clock}) => SunonoChatController(
         api: SunonoApi(
           shopKey: 'pk_test',
           apiBase: 'https://api.test/api',
           appOrigin: 'https://shop.example',
-          clientFactory: () => MockClient.streaming(server.handle),
+          clientFactory: () => track(MockClient.streaming(server.handle)),
           turnTimeout: timeout ?? const Duration(seconds: 90),
           requestTimeout: timeout ?? const Duration(seconds: 15),
         ),
         storage: MemoryStorage(),
         recoveryChecks: const [Duration(milliseconds: 5)],
+        clock: clock ?? DateTime.now,
       );
 
   setUp(() {
+    clients = [];
     server = FakeServer();
     c = make();
   });
@@ -170,19 +202,55 @@ void main() {
       expect(server.count('/chat'), 1, reason: 'the next message is a plain text turn');
     });
 
-    test('send holds back while the photo is uploading or failed (nothing is dropped silently)', () async {
+    test('send holds back while a retryable failure (rate_limited) is on the photo', () async {
       await c.open();
-      server.failUploadOnce = (503, 'image_unavailable');
+      server.failUploadOnce = (429, 'rate_limited');
       await c.attachPhoto(SunonoImage(_jpeg()));
+      expect((c.photo.value as PhotoFailed).retryable, isTrue);
       await c.send('شو هاد؟');
       expect(c.messages, isEmpty);
       expect(c.photo.value, isA<PhotoFailed>());
     });
 
+    test('send holds back while the photo is uploading', () async {
+      await c.open();
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      final up = c.attachPhoto(SunonoImage(_jpeg()));
+      await server.until(() => server.count('/chat/upload') == 1);
+      await c.send('شو هاد؟');
+      expect(c.messages, isEmpty);
+      gate.complete();
+      await up;
+    });
+
+    test('a photo that can never upload is dropped: the typed text goes out alone', () async {
+      await c.open();
+      for (final (status, code) in [
+        (503, 'image_unavailable'),
+        (422, 'image_blocked'),
+        (413, 'image_too_large'),
+        (400, 'invalid_image'),
+        (403, 'customer_blocked'),
+      ]) {
+        server.failUploadOnce = (status, code);
+        await c.attachPhoto(SunonoImage(_jpeg()));
+        expect((c.photo.value as PhotoFailed).retryable, isFalse, reason: code);
+        await c.send('احكيلك بالكلام $code');
+        expect(c.photo.value, isA<PhotoIdle>(), reason: code);
+        expect(c.photoImage, isNull);
+        expect(c.messages.last.text, 'تمام', reason: code);
+        expect(c.messages.where((m) => m.localImage != null), isEmpty);
+      }
+      expect(server.count('/chat'), 5);
+      expect(server.count('/chat/stream'), 0);
+    });
+
     test('retry of the turn reuses the image_ref: no new upload', () async {
       await c.open();
       await ready();
-      server.failStreamOnce = 400;
+      server.failStreamWith = 502; // may have run: recovery finds nothing, the bubble fails
+      server.failStreamTimes = 1;
       await c.send('شو هاد؟');
       expect(c.messages.last.state, MessageState.failed);
       await c.retry(c.messages.last);
@@ -206,6 +274,98 @@ void main() {
       await c.reset();
       expect(c.photo.value, isA<PhotoIdle>());
       expect(c.photoImage, isNull);
+    });
+
+    test('an expired image_ref (400, no error key): one re-upload, same client_message_id, turn succeeds', () async {
+      await c.open();
+      await ready();
+      server
+        ..failStreamWith = 400
+        ..failStreamTimes = 1
+        ..failStreamBody = {'message': 'image_ref is invalid or expired'};
+      await c.send('شو هاد؟');
+      expect(server.count('/chat/upload'), 2);
+      expect(server.count('/chat/stream'), 2);
+      final bodies = [for (final b in server.bodies['/chat/stream']!) jsonDecode(b) as Map];
+      expect(bodies.map((b) => b['image_ref']).toList(), ['img_ref_1', 'img_ref_2']);
+      expect(bodies[0]['client_message_id'], bodies[1]['client_message_id']);
+      expect(c.messages.last.text, 'هاي الصورة');
+    });
+
+    test('a second 400 is final: no re-upload loop', () async {
+      await c.open();
+      await ready();
+      server
+        ..failStreamWith = 400
+        ..failStreamTimes = 2
+        ..failStreamBody = {'message': 'image_ref is invalid or expired'};
+      await c.send('شو هاد؟');
+      expect(server.count('/chat/upload'), 2);
+      expect(server.count('/chat/stream'), 2);
+      expect(c.messages.last.state, MessageState.failed);
+      expect(c.messages.last.errorCode, 'http_400');
+    });
+
+    test('a ref older than 55 minutes is uploaded again at send time; a fresher one is not', () async {
+      var now = DateTime(2026, 1, 1, 12);
+      c.dispose();
+      c = make(clock: () => now);
+      await c.open();
+      await ready();
+      now = now.add(const Duration(minutes: 54));
+      await c.send('شو هاد؟');
+      expect(server.count('/chat/upload'), 1);
+      await ready(); // upload #2 at t = 54 min
+      now = now.add(const Duration(minutes: 56));
+      await c.send('وهاد؟');
+      expect(server.count('/chat/upload'), 3);
+      expect(server.count('/chat/stream'), 2);
+      expect(jsonDecode(server.bodies['/chat/stream']!.last)['image_ref'], 'img_ref_3');
+    });
+
+    test('reset during an upload: the old shopper\'s photo never lands, the upload client is closed', () async {
+      await c.open();
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      final up = c.attachPhoto(SunonoImage(_jpeg()));
+      await server.until(() => server.count('/chat/upload') == 1);
+      final reset = c.reset();
+      expect(c.photo.value, isA<PhotoIdle>(), reason: 'cleared before the first await');
+      await reset;
+      expect(uploadClientClosed(), isTrue);
+      gate.complete();
+      await up;
+      expect(c.photo.value, isA<PhotoIdle>());
+      expect(c.photoImage, isNull);
+    });
+
+    test('dispose during an upload: no state after dispose, the upload client is closed', () async {
+      final d = make();
+      await d.open();
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      final up = d.attachPhoto(SunonoImage(_jpeg()));
+      await server.until(() => server.count('/chat/upload') == 1);
+      d.dispose();
+      await Future<void>.delayed(Duration.zero);
+      expect(uploadClientClosed(), isTrue);
+      gate.complete();
+      await up; // would throw on a disposed notifier if it still wrote
+    });
+
+    test('platform_disabled during an upload clears the photo (the chat is off), not "offline"', () async {
+      await c.open();
+      server.failUploadOnce = (403, 'platform_disabled');
+      await c.attachPhoto(SunonoImage(_jpeg()));
+      expect(c.photo.value, isA<PhotoIdle>());
+      expect(c.status, ChatStatus.disabled);
+    });
+
+    test('customer_blocked (403) is its own code', () async {
+      await c.open();
+      server.failUploadOnce = (403, 'customer_blocked');
+      await c.attachPhoto(SunonoImage(_jpeg()));
+      expect((c.photo.value as PhotoFailed).code, 'customer_blocked');
     });
   });
 
@@ -268,17 +428,67 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('image_unavailable shows the per-code copy under the preview; Retry re-uploads', (tester) async {
+    testWidgets('image_unavailable shows the per-code copy without Retry; picking again uploads anew', (tester) async {
       await pump(tester);
       server.failUploadOnce = (503, 'image_unavailable');
       await tester.tap(find.byTooltip('أرفق صورة'));
       await settle(tester);
       expect(find.text('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام'), findsOneWidget);
-      await tester.tap(find.text('أعد المحاولة'));
+      expect(find.text('أعد المحاولة'), findsNothing);
+      await tester.tap(find.byTooltip('أرفق صورة'));
       await settle(tester);
       expect(find.text('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام'), findsNothing);
       expect(c.photo.value, isA<PhotoReady>());
       expect(server.count('/chat/upload'), 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a retryable failure shows Retry, which re-uploads', (tester) async {
+      await pump(tester);
+      server.failUploadOnce = (429, 'rate_limited');
+      await tester.tap(find.byTooltip('أرفق صورة'));
+      await settle(tester);
+      await tester.tap(find.text('أعد المحاولة'));
+      await settle(tester);
+      expect(c.photo.value, isA<PhotoReady>());
+      expect(server.count('/chat/upload'), 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('customer_blocked copy; a failed unusable photo: Send is tappable, no Retry, text goes alone',
+        (tester) async {
+      await pump(tester, lang: 'en');
+      server.failUploadOnce = (403, 'customer_blocked');
+      await tester.tap(find.byTooltip('Attach a photo'));
+      await settle(tester);
+      expect(find.text("We can't accept photos right now"), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
+      await tapSend(tester); // empty text: nothing to send
+      expect(server.count('/chat'), 0);
+      await tester.enterText(find.byType(TextField), 'what do you have?');
+      await tester.pump();
+      await tapSend(tester);
+      expect(server.count('/chat'), 1);
+      expect(server.count('/chat/stream'), 0);
+      expect(c.photo.value, isA<PhotoIdle>());
+      expect(find.text("We can't accept photos right now"), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a retryable failure keeps Send inert until Retry works', (tester) async {
+      await pump(tester, lang: 'en');
+      server.failUploadOnce = (429, 'rate_limited');
+      await tester.tap(find.byTooltip('Attach a photo'));
+      await settle(tester);
+      await tester.enterText(find.byType(TextField), 'what is this');
+      await tester.pump();
+      await tapSend(tester);
+      expect(server.count('/chat'), 0);
+      expect(c.photo.value, isA<PhotoFailed>());
+      await tester.tap(find.text('Retry'));
+      await settle(tester);
+      await tapSend(tester);
+      expect(server.count('/chat/stream'), 1);
       await tester.pumpWidget(const SizedBox());
     });
 

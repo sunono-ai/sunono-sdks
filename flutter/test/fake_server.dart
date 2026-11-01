@@ -33,8 +33,10 @@ class FakeServer {
   /// One-shot `/chat/upload` failure `(status, error code)`.
   (int, String)? failUploadOnce;
 
-  /// One-shot `/chat/stream` failure status.
-  int? failStreamOnce;
+  /// `/chat/stream` answers [failStreamWith] with [failStreamBody], [failStreamTimes] times.
+  int? failStreamWith;
+  int failStreamTimes = 0;
+  Map<String, dynamic> failStreamBody = {'error': 'bad_request'};
   StreamController<List<int>>? live;
   int _tokens = 0;
 
@@ -105,12 +107,11 @@ class FakeServer {
           failUploadOnce = null;
           return _json({'error': code}, status);
         }
-        return _json({'image_ref': 'img_ref_1', 'url': 'https://cdn.test/p.jpg'});
+        return _json({'image_ref': 'img_ref_${count('/chat/upload')}', 'url': 'https://cdn.test/p.jpg'});
       case '/chat/stream':
-        if (failStreamOnce != null) {
-          final s = failStreamOnce!;
-          failStreamOnce = null;
-          return _json({'error': 'bad_request'}, s);
+        if (failStreamTimes > 0) {
+          failStreamTimes--;
+          return _json(failStreamBody, failStreamWith!);
         }
         const frames = 'data: {"type":"stage","stage":"understand"}\n\n'
             'data: {"type":"done","reply":"هاي الصورة","msg_ref":"msg_p","action_data":{}}\n\n';
