@@ -344,6 +344,21 @@ void main() {
       ctl.dispose();
     });
 
+    test('a cart pull that a reset overtakes reports no error to the host', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final gate = Completer<void>();
+      server
+        ..beforeCartReply = (() => gate.future)
+        ..failCartOnceWith = 401;
+      final pulling = c.refreshCart();
+      await server.until(() => server.count('/chat/cart') == 1);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([pulling, resetting]);
+      expect(events.whereType<ErrorEvent>(), isEmpty);
+    });
+
     test('a disposed controller never opens or resumes', () async {
       final ctl = make();
       ctl.dispose();

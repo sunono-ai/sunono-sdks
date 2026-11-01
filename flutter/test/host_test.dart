@@ -359,6 +359,28 @@ void main() {
       storage.failUserIdRead = false;
       expect(await storage.read('sunono.user_id.pk_test'), stored);
     });
+
+    test('reset after a failed read forgets both the in-memory and the stored shopper', () async {
+      const stored = '11111111-1111-4111-8111-111111111111';
+      final storage = _FlakyStorage();
+      await storage.write('sunono.user_id.pk_test', stored);
+      storage.failUserIdRead = true;
+      c.dispose();
+      c = make(storage: storage);
+      await c.open();
+      await server.until(() => server.live != null);
+      final memory = c.userId;
+      storage.failUserIdRead = false; // the keychain is back: the reset's delete reads the stored id
+      await c.reset();
+      await server.until(() => server.count('/chat/forget') == 2);
+      final inits = server.bodies['/shops/init']!.map((b) => jsonDecode(b)['user_id']);
+      expect(inits, contains(stored), reason: 'the stored shopper is re-inited for its own forget');
+      expect(inits, contains(memory));
+      for (var i = 0; i < 100 && await storage.read('sunono.pending_forget.pk_test') != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(await storage.read('sunono.pending_forget.pk_test'), isNull, reason: 'both forgets landed');
+    });
   });
 
   group('reset forgets the device', () {

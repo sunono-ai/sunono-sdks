@@ -508,17 +508,35 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       }
       _forgetPending(id: id, token: oldToken);
     }
+    if (oldId != null) {
+      // After a failed id read the shopper in memory is process-only; the
+      // stored one the delete just removed needs its own forget.
+      unawaited(cleared.then((stored) {
+        if (stored != null && stored != oldId) _forgetPending(id: stored, remember: true);
+      }));
+    }
     if (wasOpen && !_disposed) await open();
   }
 
   /// Send the forget for [id] (from a reset; queued behind one in flight) or
   /// for the stored pending shopper (skipped while one is in flight). [token]
-  /// is [id]'s; anyone else is re-inited by their own id.
-  void _forgetPending({String? id, String? token}) {
+  /// is [id]'s; anyone else is re-inited by their own id. [remember] stores
+  /// [id] as the pending shopper first when no other is pending.
+  void _forgetPending({String? id, String? token, bool remember = false}) {
     final prev = _forgetting;
     if (prev != null && id == null) return;
     late final Future<void> f;
-    f = _forgetting = (prev ?? Future<void>.value()).then((_) => _runForget(id, token)).whenComplete(() {
+    f = _forgetting = (prev ?? Future<void>.value()).then((_) async {
+      if (remember) {
+        try {
+          // ponytail: one pending slot; an earlier shopper still pending keeps it and this one is tried only now
+          if (await _storage.read(_pendingForgetKey).timeout(storageTimeout) == null) {
+            await _storage.write(_pendingForgetKey, id!).timeout(storageTimeout);
+          }
+        } catch (_) {}
+      }
+      await _runForget(id, token);
+    }).whenComplete(() {
       if (identical(_forgetting, f)) _forgetting = null;
     });
   }
@@ -596,7 +614,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       _setCart(c.cart, fromSync: c.linked && _cartSig(c.cart) != _cartSig(_cart));
       _changed();
     } catch (e, s) {
-      _emit(ErrorEvent(e, s));
+      if (epoch == _epoch) _emit(ErrorEvent(e, s)); // a reset is not an error
     }
   }
 
@@ -623,6 +641,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       final bound = await _api.bindCart(uid, proof);
       if (epoch == _epoch) _setBound(bound, gen);
     } catch (e, s) {
+      if (epoch != _epoch) return; // a reset is not an error
       if (e is SunonoHttpException && e.isPlatformDisabled) _disable('platform_disabled');
       _emit(ErrorEvent(e, s)); // never loops: next open/resume/refresh tries again
     }
@@ -999,7 +1018,13 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> refreshHistory() async {
     final epoch = _epoch;
     final ticket = ++_cartReq, gen = _linkGen;
-    final h = await _session.authed(_api.history);
+    final History h;
+    try {
+      h = await _session.authed(_api.history);
+    } catch (_) {
+      if (epoch != _epoch) return; // a reset is not an error
+      rethrow;
+    }
     if (epoch != _epoch || _disposed) return;
     if (_messages.isEmpty) {
       _messages.addAll(h.rows.map(_fromRow));
