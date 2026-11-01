@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  matrix:
+    name: test (${{ matrix.flutter-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -36,6 +37,14 @@ jobs:
       - run: flutter test
       - if: matrix.flutter-version == 'stable'
         run: dart pub publish --dry-run
+
+  # The single required check on main: green only when every matrix leg is.
+  test:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.matrix.result }}" = success
 
   # Tag `flutter-v<version>` (matching pubspec) to publish. Needs pub.dev
   # "Automated publishing" on for this repo with tag pattern
