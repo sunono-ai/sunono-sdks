@@ -24,6 +24,8 @@ abstract final class Sunono {
   ///   Required: without a persistent one every cold start is a new shopper.
   /// - [cartBridge]: Magento cart sync proofs, if your shop uses it.
   /// - [pickImage]: enables photo messages.
+  /// - [starterPrompts]: replaces the empty-thread starter chips per language,
+  ///   e.g. `{'ar': ['شو في جديد؟'], 'en': ["What's new?"]}`; `[]` shows none.
   /// - [onIntent]: route product/cart/checkout taps; return true if handled.
   static SunonoChatController init({
     required String shopKey,
@@ -34,6 +36,7 @@ abstract final class Sunono {
     SunonoCartBridge? cartBridge,
     Future<SunonoImage?> Function()? pickImage,
     bool Function(SunonoIntent intent)? onIntent,
+    Map<String, List<String>>? starterPrompts,
     SunonoTheme? theme,
     http.Client Function()? httpClientFactory,
   }) {
@@ -51,6 +54,7 @@ abstract final class Sunono {
       lang: locale,
       cartBridge: cartBridge,
       onIntent: onIntent,
+      starterPrompts: starterPrompts,
     );
   }
 

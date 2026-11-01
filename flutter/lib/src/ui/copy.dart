@@ -8,14 +8,19 @@ class SunonoCopy {
 
   String _t(String ar, String en) => _ar ? ar : en;
 
-  String get title => _t('المساعد', 'Assistant');
+  String get title => _t('مساعد المتجر', 'Shop assistant');
   String get inputHint => _t('اكتب رسالتك…', 'Type a message…');
   String get photoCaptionHint => _t('اكتب سؤالك عن الصورة…', 'Ask something about the photo…');
   String get send => _t('إرسال', 'Send');
   String get attachPhoto => _t('أرفق صورة', 'Attach a photo');
   String get removePhoto => _t('شيل الصورة', 'Remove photo');
-  String get welcome => _t('أهلين! شو بتدور عليه اليوم؟', 'Hi! What are you looking for today?');
-  String get storeTeam => _t('فريق المتجر', 'Store team');
+  String get welcome => _t('أهلاً بك! كيف يمكنني مساعدتك اليوم؟', 'Hi! How can I help you today?');
+  List<String> get starters => _ar
+      ? const ['شو في جديد عندكم؟', 'بدي أتابع طلبي', 'في عروض هلأ؟']
+      : const ["What's new?", 'Track my order', 'Any offers?'];
+  String get storeTeam => _t('خدمة العملاء', 'Store team');
+  String get viewImage => _t('اعرض الصورة', 'View photo');
+  String get close => _t('إغلاق', 'Close');
   String get paused => _t('حوّلنا المحادثة لخدمة العملاء 🧑‍💼', 'This conversation was handed to our team 🧑‍💼');
   String get resumed => _t('رجع المساعد الآلي 🤖', 'The assistant is back 🤖');
   String get retry => _t('أعد المحاولة', 'Retry');

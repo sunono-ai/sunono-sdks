@@ -525,7 +525,9 @@ class ShopConfig {
   final String? disabledReason;
 
   String? title(String lang) => pickLang(titleAr, titleEn, lang);
-  String? welcome(String lang) => pickLang(welcomeAr, welcomeEn, lang);
+
+  /// The shop's welcome in [lang] only: never the other language's text.
+  String? welcome(String lang) => lang == 'en' ? welcomeEn : welcomeAr;
 }
 
 /// One row of `/chat/history?shape=v2`.

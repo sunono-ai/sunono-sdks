@@ -72,3 +72,22 @@ String detailsPhrase(String title, String lang) =>
     lang == 'ar' ? 'احكيلي أكثر عن "$title"' : 'Tell me more about "$title"';
 
 String showMorePhrase(String lang) => lang == 'en' ? 'Show me more' : 'ورجيني كمان';
+
+/// «09:05»: local time, 24 h, Latin digits in every language (no `intl`).
+String formatTime(DateTime t, String lang) {
+  final l = t.toLocal();
+  return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
+}
+
+// Unicode format characters (category Cf): bidi controls, zero-width, joiners.
+final _format =
+    RegExp('[\u00AD\u0600-\u0605\u061C\u06DD\u070F\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]');
+
+/// A link worth making tappable: `https://`, an ASCII host, and no hidden
+/// format characters (a bidi override can make `evil.com` read as another site).
+bool isSafeLink(String url) {
+  if (!url.startsWith('https://') || _format.hasMatch(url)) return false;
+  // Check the raw authority: Uri.host would percent-encode a non-ASCII name.
+  final authority = url.substring('https://'.length).split(RegExp('[/?#]')).first;
+  return authority.isNotEmpty && authority.codeUnits.every((c) => c < 128) && Uri.tryParse(url)?.host != '';
+}

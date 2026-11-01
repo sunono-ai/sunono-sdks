@@ -21,7 +21,8 @@ void main() {
     expect(c.enabled, e['enabled']);
     expect(c.title('ar'), e['title_ar']);
     expect(c.title('en'), e['title_en']);
-    expect(c.welcome('en'), e['welcome_en_falls_back_to_ar']);
+    expect(c.welcome('ar'), e['welcome_ar']);
+    expect(c.welcome('en'), e['welcome_en'], reason: 'no cross-language fallback');
     expect(c.typingHint, e['typing_hint']);
     expect(ShopConfig.fromJson(fixture('config_disabled.json')['response'] as Map<String, dynamic>).enabled, isFalse);
   });

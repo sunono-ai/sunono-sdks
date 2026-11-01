@@ -138,28 +138,48 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
               textAlign: TextAlign.center, style: theme.text(color: theme.muted)));
     } else {
       final msgs = _c.messages;
-      final lastBot = msgs.lastIndexWhere((m) => m.role == ChatRole.bot && m.state == MessageState.done);
+      final starters = msgs.isEmpty && _c.status == ChatStatus.ready ? (_c.starterPrompts?[lang] ?? t.starters) : null;
+      // The welcome is a permanent first bot bubble, not a message from the server.
+      final welcome = ChatMessage(id: 'welcome', role: ChatRole.bot, text: _c.config.welcome(lang) ?? t.welcome);
       body = Column(children: [
         Expanded(
-          child: msgs.isEmpty
-              ? _Welcome(
-                  theme: theme, text: _c.config.welcome(lang) ?? t.welcome, loading: _c.status != ChatStatus.ready)
-              : ListView.builder(
-                  reverse: true,
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                  itemCount: msgs.length,
-                  itemBuilder: (_, i) {
-                    final index = msgs.length - 1 - i;
-                    return _MessageItem(
-                      key: ValueKey(msgs[index].id),
-                      message: msgs[index],
-                      controller: _c,
-                      theme: theme,
-                      lang: lang,
-                      isLatestBot: index == lastBot,
-                    );
-                  },
-                ),
+          child: ListView.builder(
+            reverse: true,
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            itemCount: msgs.length + 1,
+            itemBuilder: (_, i) {
+              final index = msgs.length - 1 - i;
+              if (index < 0) {
+                return _MessageItem(
+                  key: const ValueKey('welcome'),
+                  message: welcome,
+                  controller: _c,
+                  theme: theme,
+                  lang: lang,
+                  isLast: false,
+                  timed: false,
+                  footer: starters == null || starters.isEmpty
+                      ? null
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Wrap(spacing: 8, runSpacing: 8, children: [
+                            for (final p in starters)
+                              SunonoChip(
+                                  theme: theme, label: p, onTap: _c.busy ? null : () => _c.send(p, synthetic: true)),
+                          ]),
+                        ),
+                );
+              }
+              return _MessageItem(
+                key: ValueKey(msgs[index].id),
+                message: msgs[index],
+                controller: _c,
+                theme: theme,
+                lang: lang,
+                isLast: index == msgs.length - 1,
+              );
+            },
+          ),
         ),
         if (_c.cart != null && _c.cart!.count > 0)
           Padding(
@@ -245,25 +265,6 @@ class _Header extends StatelessWidget {
       );
 }
 
-class _Welcome extends StatelessWidget {
-  const _Welcome({required this.theme, required this.text, required this.loading});
-  final SunonoTheme theme;
-  final String text;
-  final bool loading;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            PresenceOrb(theme: theme, size: 112, thinking: loading),
-            const SizedBox(height: 20),
-            Text(text, textAlign: TextAlign.center, style: theme.text(size: 17, weight: FontWeight.w600, height: 1.4)),
-          ]),
-        ),
-      );
-}
-
 /// One message plus whatever rides on it (cards, checkout, chips).
 class _MessageItem extends StatefulWidget {
   const _MessageItem({
@@ -272,14 +273,24 @@ class _MessageItem extends StatefulWidget {
     required this.controller,
     required this.theme,
     required this.lang,
-    required this.isLatestBot,
+    required this.isLast,
+    this.timed = true,
+    this.footer,
   });
 
   final ChatMessage message;
   final SunonoChatController controller;
   final SunonoTheme theme;
   final String lang;
-  final bool isLatestBot;
+
+  /// The last message overall: the only one that offers Show more.
+  final bool isLast;
+
+  /// Whether the time shows under the bubble (not for the welcome).
+  final bool timed;
+
+  /// Extra content under the bubble (the starter chips).
+  final Widget? footer;
 
   @override
   State<_MessageItem> createState() => _MessageItemState();
@@ -325,8 +336,18 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
     final m = widget.message;
     final theme = widget.theme;
     final c = widget.controller;
+    final footer = widget.footer;
+    final timed = widget.timed;
     final t = SunonoCopy.of(widget.lang);
     final contentLang = m.replyLang ?? widget.lang;
+    Widget time(AlignmentGeometry align) => Padding(
+          padding: const EdgeInsets.only(top: 2, left: 6, right: 6),
+          child: Align(
+            alignment: align,
+            child: Text(formatTime(m.ts, widget.lang),
+                textDirection: TextDirection.ltr, style: theme.text(size: 10, color: theme.muted)),
+          ),
+        );
 
     if (m.role == ChatRole.system) {
       return Center(
@@ -348,13 +369,17 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
             if (m.localImage != null || m.imageUrl != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: SizedBox(
-                    width: 180,
-                    child: m.localImage != null
-                        ? Image.memory(m.localImage!, fit: BoxFit.cover)
-                        : boundedNetworkImage(context, m.imageUrl!, width: 180),
+                child: _Zoomable(
+                  label: t.viewImage,
+                  onTap: () => _openLightbox(context, m, t, widget.lang),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: SizedBox(
+                      width: 180,
+                      child: m.localImage != null
+                          ? Image.memory(m.localImage!, fit: BoxFit.cover)
+                          : boundedNetworkImage(context, m.imageUrl!, width: 180),
+                    ),
                   ),
                 ),
               ),
@@ -372,6 +397,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
               child: _BubbleText(
                   text: m.text, theme: theme, color: Colors.white, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
             ),
+            time(AlignmentDirectional.centerEnd),
           ]),
         ),
       );
@@ -407,9 +433,13 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
         ));
       }
       if (m.imageUrl != null) {
-        children.add(ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: SizedBox(width: 200, child: boundedNetworkImage(context, m.imageUrl!, width: 200)),
+        children.add(_Zoomable(
+          label: t.viewImage,
+          onTap: () => _openLightbox(context, m, t, widget.lang),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(width: 200, child: boundedNetworkImage(context, m.imageUrl!, width: 200)),
+          ),
         ));
       }
       if (m.text.trim().isNotEmpty) {
@@ -429,6 +459,9 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
           child: _BubbleText(text: sanitizeReply(m.text), theme: theme, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
         ));
       }
+      if (timed && (m.text.trim().isNotEmpty || m.imageUrl != null)) {
+        children.add(time(AlignmentDirectional.centerStart));
+      }
       if (m.products.isNotEmpty) {
         children.add(Padding(
           padding: const EdgeInsets.only(top: 6),
@@ -447,7 +480,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
           ),
         ));
       }
-      if (m.hasMore && widget.isLatestBot) {
+      if (m.hasMore && m.products.isNotEmpty && widget.isLast) {
         children.add(SunonoChip(
           theme: theme,
           label: t.showMore,
@@ -465,6 +498,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
           child: HandoffButton(theme: theme, label: t.completeOrder, onTap: () => c.checkout(m.handoffUrl)),
         ));
       }
+      if (footer != null) children.add(footer);
     }
     return Align(
       alignment: AlignmentDirectional.centerStart,
@@ -486,7 +520,7 @@ class _BubbleText extends StatelessWidget {
   final void Function(String url) onLink;
   final Color? color;
 
-  static final _url = RegExp(r'https?://[^\s<>"]+');
+  static final _url = RegExp(r'https://[^\s<>"]+');
   static final _trailing = RegExp(r'[.,;:!?)\]}»؟،؛]+$');
 
   @override
@@ -495,9 +529,11 @@ class _BubbleText extends StatelessWidget {
     final spans = <InlineSpan>[];
     var last = 0;
     for (final m in _url.allMatches(text)) {
-      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
       // Prose punctuation right after a link isn't part of it («…/p؟», «(…/p)»).
       final url = m.group(0)!.replaceFirst(_trailing, '');
+      // Unsafe (hidden format chars, non-ASCII host): stays plain text.
+      if (!isSafeLink(url)) continue;
+      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.baseline,
         baseline: TextBaseline.alphabetic,
@@ -516,6 +552,57 @@ class _BubbleText extends StatelessWidget {
       textDirection: isRtlText(text, fallbackRtl: uiRtl) ? TextDirection.rtl : TextDirection.ltr,
     );
   }
+}
+
+/// Wraps a bubble image so a tap opens it full screen.
+class _Zoomable extends StatelessWidget {
+  const _Zoomable({required this.label, required this.onTap, required this.child});
+  final String label;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: child));
+}
+
+void _openLightbox(BuildContext context, ChatMessage m, SunonoCopy t, String lang) {
+  final image = m.localImage != null
+      ? Image.memory(m.localImage!, fit: BoxFit.contain)
+      : Image.network(
+          m.imageUrl!,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) =>
+              const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48)),
+        );
+  Navigator.of(context).push(MaterialPageRoute<void>(
+    fullscreenDialog: true,
+    builder: (_) => Directionality(
+      textDirection: lang == 'ar' ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(children: [
+          Positioned.fill(child: InteractiveViewer(minScale: 1, maxScale: 5, child: Center(child: image))),
+          PositionedDirectional(
+            top: 0,
+            end: 0,
+            child: SafeArea(
+              child: Builder(
+                builder: (ctx) => IconButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  tooltip: t.close,
+                  icon: const Icon(Icons.close_rounded, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    ),
+  ));
 }
 
 class _Composer extends StatelessWidget {

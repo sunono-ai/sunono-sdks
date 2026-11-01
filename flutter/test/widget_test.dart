@@ -73,7 +73,7 @@ void main() {
     };
     await tester.pumpWidget(app(SunonoChatView(controller: make('ar'))));
     await settle(tester);
-    expect(find.text('أهلين! شو بتدور عليه اليوم؟'), findsOneWidget);
+    expect(find.text('أهلاً بك! كيف يمكنني مساعدتك اليوم؟'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'بدي قهوة');
     await tester.pump();

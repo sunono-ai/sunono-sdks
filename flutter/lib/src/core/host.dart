@@ -101,3 +101,13 @@ class ErrorEvent extends SunonoEvent {
   final Object error;
   final StackTrace? stackTrace;
 }
+
+/// Reported through [ErrorEvent] when an intent has no handler and the SDK has
+/// no fallback of its own (open URL, open cart, checkout).
+class UnhandledIntent implements Exception {
+  const UnhandledIntent(this.intent);
+  final SunonoIntent intent;
+
+  @override
+  String toString() => 'UnhandledIntent(${intent.runtimeType})';
+}

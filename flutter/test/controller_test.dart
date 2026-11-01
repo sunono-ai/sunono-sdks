@@ -166,7 +166,8 @@ void main() {
     });
     await server.until(() => c.cart != null);
     await pumpEvents();
-    expect(c.messages.map((m) => m.role).toList(), [ChatRole.staff, ChatRole.system]);
+    expect(c.messages.map((m) => m.role).toList(), [ChatRole.system, ChatRole.staff],
+        reason: 'the pill sorts by bot_paused_at');
     expect(c.paused, isTrue);
     expect(c.cart!.count, 3);
     expect(events.whereType<CartChangedEvent>(), hasLength(1));

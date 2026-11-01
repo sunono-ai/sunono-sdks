@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'api.dart';
+import 'format.dart';
 import 'host.dart';
 import 'live.dart';
 import 'models.dart';
@@ -38,6 +39,7 @@ class ChatMessage {
     this.checkout,
     this.handoffUrl,
     this.msgRef,
+    this.clientRef,
     DateTime? ts,
     this.state = MessageState.done,
     this.stage,
@@ -55,6 +57,9 @@ class ChatMessage {
   Checkout? checkout;
   String? handoffUrl;
   String? msgRef;
+
+  /// The `client_message_id` of the turn that produced this bubble (live dedupe).
+  String? clientRef;
   DateTime ts;
   MessageState state;
   String? stage;
@@ -92,6 +97,7 @@ class SunonoChatController extends ChangeNotifier {
     String lang = 'ar',
     this.cartBridge,
     this.onIntent,
+    this.starterPrompts,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
     DateTime Function() clock = DateTime.now,
   })  : _api = api,
@@ -114,6 +120,10 @@ class SunonoChatController extends ChangeNotifier {
 
   /// Returns true when the host handled the intent.
   bool Function(SunonoIntent intent)? onIntent;
+
+  /// Host override of the empty-thread starter chips, by language (`ar` / `en`).
+  /// A language that is missing uses the SDK defaults; an empty list shows none.
+  final Map<String, List<String>>? starterPrompts;
 
   /// Delays between history checks while recovering (cumulative waits).
   final List<Duration> recoveryChecks;
@@ -547,6 +557,7 @@ class SunonoChatController extends ChangeNotifier {
       ..checkout = r.checkout
       ..handoffUrl = r.handoffUrl
       ..msgRef = r.msgRef
+      ..clientRef = bot._outgoing?.clientMessageId
       ..replyLang = r.replyLang
       ..ts = DateTime.now()
       ..state = MessageState.done
@@ -602,9 +613,14 @@ class SunonoChatController extends ChangeNotifier {
               .any((i) => rows[i].role == 'user' && rows[i].text == out.text && rows[i + 1].msgRef == liveRef);
       if (repliedLive || _unknownUserRows(h).any((r) => r.text == out.text)) {
         // The turn happened: the server's thread is the truth now.
+        final pills = _messages.where((m) => m.role == ChatRole.system).toList();
         _messages
           ..clear()
           ..addAll(h.rows.map(_fromRow));
+        for (final p in pills) {
+          _insertPill(p);
+        }
+        _syncPausePill(h.pausedAt);
         _applyHistoryMeta(h, ticket, gen);
         _changed();
         return;
@@ -683,6 +699,7 @@ class SunonoChatController extends ChangeNotifier {
         return m.state == MessageState.recovering && m._outgoing?.user.msgRef != null;
       });
     }
+    _syncPausePill(h.pausedAt);
     _applyHistoryMeta(h, ticket, gen);
     _changed();
     if (h.cartLinked) await refreshCart();
@@ -703,31 +720,77 @@ class SunonoChatController extends ChangeNotifier {
     if (_cartFresh(ticket)) _setCart(h.cart); // the server's cart row is the truth, empty included
   }
 
+  /// A live message already on screen: by msg_ref, then client_ref, then the
+  /// same role + text within 15 s (a repeated «تمام» a minute later is new).
+  bool _isDuplicateLive(ChatRole role, String text, String? ref, String? clientRef, DateTime? ts) {
+    if (ref != null && (_trimmed.contains(ref) || _messages.any((m) => m.msgRef == ref))) return true;
+    if (clientRef != null && _messages.any((m) => m.role == role && m.clientRef == clientRef)) return true;
+    final at = ts ?? DateTime.now();
+    return _messages.any((m) =>
+        m.role == role &&
+        m.text == text &&
+        (ref == null || m.msgRef == null) &&
+        m.ts.difference(at).abs() < const Duration(seconds: 15));
+  }
+
+  /// Put a pill in time order. A tie with a staff bubble goes before it.
+  /// Returns false when the same pill (ts + text) is already there.
+  bool _insertPill(ChatMessage pill) {
+    if (_messages.any((m) => m.role == ChatRole.system && m.text == pill.text && m.ts.isAtSameMomentAs(pill.ts))) {
+      return false;
+    }
+    var i = _messages.length;
+    while (i > 0 &&
+        (_messages[i - 1].ts.isAfter(pill.ts) ||
+            (_messages[i - 1].ts.isAtSameMomentAs(pill.ts) && _messages[i - 1].role == ChatRole.staff))) {
+      i--;
+    }
+    _messages.insert(i, pill);
+    return true;
+  }
+
+  /// The "handed to our team" pill for a pause at [at]: right before the first
+  /// staff row within 60 s after it, else in time order at [at]. Idempotent.
+  void _syncPausePill(DateTime? at) {
+    if (at == null) return;
+    final old = _messages
+        .where((m) => m.role == ChatRole.system && m.text == 'paused' && m.ts.isAtSameMomentAs(at))
+        .firstOrNull;
+    if (old != null) _messages.remove(old);
+    final pill = old ?? ChatMessage(id: _id(), role: ChatRole.system, text: 'paused', ts: at);
+    final staff = _messages.indexWhere(
+        (m) => m.role == ChatRole.staff && !m.ts.isBefore(at) && m.ts.difference(at) <= const Duration(seconds: 60));
+    if (staff >= 0) {
+      _messages.insert(staff, pill);
+    } else {
+      _insertPill(pill);
+    }
+  }
+
   void _onLive(String type, Map<String, dynamic> data) {
     switch (type) {
       case 'message.new':
         final text = data['body_text'] is String ? data['body_text'] as String : '';
         final ref = data['msg_ref'] is String ? data['msg_ref'] as String : null;
+        final clientRef = data['client_ref'] is String ? data['client_ref'] as String : null;
         final ts = DateTime.tryParse('${data['ts']}');
         final role = data['sent_by'] == 'owner' ? ChatRole.staff : ChatRole.bot;
-        if (ref != null
-            ? _messages.any((m) => m.msgRef == ref)
-            : _messages.any((m) => m.role == role && m.text == text)) {
-          return;
-        }
+        if (_isDuplicateLive(role, text, ref, clientRef, ts)) return;
         final media = data['media_stored'];
         var image = media is Map && media['kind'] == 'image' && media['url'] is String ? media['url'] as String : null;
         if (image != null && image.startsWith('/')) image = '${_api.apiOrigin}$image';
         if (image != null && !image.startsWith('https://') && !image.startsWith('http://')) image = null;
-        _messages.add(ChatMessage(id: _id(), role: role, text: text, msgRef: ref, ts: ts, imageUrl: image));
+        _messages.add(
+            ChatMessage(id: _id(), role: role, text: text, msgRef: ref, clientRef: clientRef, ts: ts, imageUrl: image));
         if (role == ChatRole.bot && _recoverWake?.isCompleted == false) _recoverWake!.complete(ref ?? '');
         _recoverWake = null;
       case 'conversation.paused':
         _paused = true;
-        _messages.add(ChatMessage(id: _id(), role: ChatRole.system, text: 'paused'));
+        _syncPausePill(DateTime.tryParse('${data['bot_paused_at']}') ?? _clock());
       case 'conversation.resumed':
         _paused = false;
-        _messages.add(ChatMessage(id: _id(), role: ChatRole.system, text: 'resumed'));
+        _insertPill(ChatMessage(
+            id: _id(), role: ChatRole.system, text: 'resumed', ts: DateTime.tryParse('${data['ts']}') ?? _clock()));
       case 'assistant.state':
         _typingHint = data['typing_hint'] != false;
       case 'cart.updated':
@@ -749,15 +812,22 @@ class SunonoChatController extends ChangeNotifier {
     return _hand(OpenProductIntent(productId: p.publicId, sku: p.sku, url: p.externalUrl, title: p.title(_lang)));
   }
 
-  void openCart() => _hand(const OpenCartIntent());
+  /// Hand [intent] to the host; with no handler there is no fallback, so say so.
+  void _handOrReport(SunonoIntent intent) {
+    if (!_hand(intent)) _emit(ErrorEvent(UnhandledIntent(intent)));
+  }
+
+  void openCart() => _handOrReport(const OpenCartIntent());
 
   void checkout(String? url) {
     _emit(const AnalyticsEvent('assistant_checkout_tapped'));
-    _hand(CheckoutIntent(url: url));
+    _handOrReport(CheckoutIntent(url: url));
     _unbind(); // the order completes on the storefront and rotates its cart
   }
 
-  void openUrl(String url) => _hand(OpenUrlIntent(url));
+  void openUrl(String url) {
+    if (isSafeLink(url)) _handOrReport(OpenUrlIntent(url));
+  }
 }
 
 /// Whether [have] is older than [min] (`x.y.z`; a pre-release suffix is ignored).
