@@ -141,9 +141,15 @@ class SunonoChatController extends ChangeNotifier {
   bool _bound = false;
   bool _ensureTried = false;
 
-  /// Bumped by every live cart write (turn, `cart.updated`): a pull or a
-  /// history response that started before one is older than it, so it's dropped.
-  int _cartSeq = 0;
+  /// Cart write ordering. Every pull or history fetch takes a ticket
+  /// (`++_cartReq`) when it STARTS; a turn or live write takes the next one
+  /// when applied. A response applies only if its ticket is newer than the last
+  /// applied one, so an older snapshot never overwrites a newer one.
+  int _cartReq = 0;
+  int _cartApplied = 0;
+
+  /// Bumped when the link is dropped: a bind that started before can't re-mark it linked.
+  int _linkGen = 0;
   bool _disposed = false;
   int _seq = 0;
 
@@ -301,8 +307,7 @@ class SunonoChatController extends ChangeNotifier {
     _trimmed.clear();
     _cart = null;
     _paused = false;
-    _bound = false;
-    _ensureTried = false;
+    _unbind();
     _busy = false;
     final wasOpen = _status == ChatStatus.ready;
     _status = ChatStatus.idle;
@@ -318,25 +323,39 @@ class SunonoChatController extends ChangeNotifier {
 
   /// The link is gone (or must be remade): the next send ensures again.
   void _unbind() {
+    _linkGen++;
     _bound = false;
     _ensureTried = false;
   }
 
   /// Follow the server's word on the link. A link that drops re-arms the
   /// once-per-open ensure.
-  void _setBound(bool linked) {
+  /// [gen] is the [_linkGen] when the answer was asked for: a "linked" that
+  /// predates a drop is stale.
+  void _setBound(bool linked, int gen) {
+    if (linked && gen != _linkGen) return;
     if (!linked && _bound) _ensureTried = false;
     _bound = linked;
+  }
+
+  /// A turn or live push wrote the cart: it is newer than any request in flight.
+  void _cartWritten() => _cartApplied = ++_cartReq;
+
+  /// Whether a response to request [ticket] may still be applied.
+  bool _cartFresh(int ticket) {
+    if (ticket <= _cartApplied) return false;
+    _cartApplied = ticket;
+    return true;
   }
 
   /// Pull the cart from the server. The host calls this after its own cart
   /// edits so the bot sees them; a pull that a newer live write overtakes is dropped.
   Future<void> refreshCart() async {
-    final epoch = _epoch, seq = _cartSeq;
+    final epoch = _epoch, ticket = ++_cartReq, gen = _linkGen;
     try {
       final c = await _session.authed(_api.cart);
-      if (epoch != _epoch || _disposed || seq != _cartSeq) return;
-      _setBound(c.linked);
+      if (epoch != _epoch || _disposed || !_cartFresh(ticket)) return;
+      _setBound(c.linked, gen);
       _setCart(c.cart, fromSync: c.linked && _cartSig(c.cart) != _cartSig(_cart));
       _changed();
     } catch (e, s) {
@@ -359,13 +378,13 @@ class SunonoChatController extends ChangeNotifier {
   Future<void> _bind({required bool ensure}) async {
     final bridge = cartBridge;
     if (bridge == null || (_bound && ensure)) return;
-    final epoch = _epoch;
+    final epoch = _epoch, gen = _linkGen;
     try {
       final uid = await _session.ensureUserId();
       final proof = ensure ? await bridge.ensureBind(uid) : await bridge.probe(uid);
       if (proof == null || epoch != _epoch) return;
       final bound = await _api.bindCart(uid, proof);
-      if (epoch == _epoch) _setBound(bound);
+      if (epoch == _epoch) _setBound(bound, gen);
     } catch (e, s) {
       if (e is SunonoHttpException && e.isPlatformDisabled) _disable('platform_disabled');
       _emit(ErrorEvent(e, s)); // never loops: next open/resume/refresh tries again
@@ -482,7 +501,8 @@ class SunonoChatController extends ChangeNotifier {
 
   void _apply(ChatMessage bot, TurnResult r) {
     if (r.typingHint != null) _typingHint = r.typingHint!;
-    if (r.cartPresent || r.cartMutated) _cartSeq++;
+    // ponytail: turn vs live cart order has no server version; a late turn snapshot can overwrite a newer live one - needs a server cart version
+    if (r.cartPresent || r.cartMutated) _cartWritten();
     if (r.cartPresent) {
       _setCart(r.cart, fromSync: r.cartMutated);
     } else if (r.cartMutated) {
@@ -539,6 +559,7 @@ class SunonoChatController extends ChangeNotifier {
         return;
       }
       final History h;
+      final ticket = ++_cartReq, gen = _linkGen;
       try {
         h = await _session.authed(_api.history);
       } catch (_) {
@@ -561,7 +582,7 @@ class SunonoChatController extends ChangeNotifier {
         _messages
           ..clear()
           ..addAll(h.rows.map(_fromRow));
-        _applyHistoryMeta(h);
+        _applyHistoryMeta(h, ticket, gen);
         _changed();
         return;
       }
@@ -607,7 +628,7 @@ class SunonoChatController extends ChangeNotifier {
   /// row's msg_ref, so device-vs-server clock skew never matters).
   Future<void> refreshHistory() async {
     final epoch = _epoch;
-    final seq = _cartSeq;
+    final ticket = ++_cartReq, gen = _linkGen;
     final h = await _session.authed(_api.history);
     if (epoch != _epoch || _disposed) return;
     if (_messages.isEmpty) {
@@ -639,9 +660,9 @@ class SunonoChatController extends ChangeNotifier {
         return m.state == MessageState.recovering && m._outgoing?.user.msgRef != null;
       });
     }
-    _applyHistoryMeta(h, cartStale: seq != _cartSeq);
+    _applyHistoryMeta(h, ticket, gen);
     _changed();
-    if (h.cartLinked && seq == _cartSeq) await refreshCart();
+    if (h.cartLinked) await refreshCart();
   }
 
   /// Legacy rows without msg_ref: same role + text within 15 s.
@@ -650,13 +671,13 @@ class SunonoChatController extends ChangeNotifier {
       m.text == r.text &&
       (r.ts == null || m.ts.difference(r.ts!).abs() < const Duration(seconds: 15)));
 
-  /// [cartStale]: a live cart write landed while [h] was in flight, so its
-  /// cart and link state are older than what we hold.
-  void _applyHistoryMeta(History h, {bool cartStale = false}) {
+  /// [ticket]/[gen]: when [h] was asked for. A newer cart write makes its cart
+  /// stale; a legacy bare array says nothing about the cart or the link.
+  void _applyHistoryMeta(History h, int ticket, int gen) {
     _paused = h.pausedAt != null;
-    if (cartStale) return;
-    _setBound(h.cartLinked);
-    if (h.hasCartKey) _setCart(h.cart); // the server's cart row is the truth, empty included
+    if (!h.hasCartKey) return;
+    _setBound(h.cartLinked, gen);
+    if (_cartFresh(ticket)) _setCart(h.cart); // the server's cart row is the truth, empty included
   }
 
   void _onLive(String type, Map<String, dynamic> data) {
@@ -687,7 +708,7 @@ class SunonoChatController extends ChangeNotifier {
       case 'assistant.state':
         _typingHint = data['typing_hint'] != false;
       case 'cart.updated':
-        _cartSeq++;
+        _cartWritten();
         _setCart(Cart.fromJson(data['cart']), fromSync: true);
       default:
         return; // forward compatibility: unknown events are ignored

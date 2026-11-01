@@ -225,9 +225,11 @@ class Cart {
   final List<ExtraLine> extraLines;
   int get extraLineCount => extraLines.length;
 
+  /// Pieces (summed qty) in the extra lines; part of [count].
+  int get extraQty => extraLines.fold(0, (s, x) => s + x.qty);
+
   /// What a shopper means by "how many things": sum of quantities.
-  int get count =>
-      (lines.isEmpty ? distinctCount : lines.fold(0, (s, l) => s + l.qty)) + extraLines.fold(0, (s, x) => s + x.qty);
+  int get count => (lines.isEmpty ? distinctCount : lines.fold(0, (s, l) => s + l.qty)) + extraQty;
 }
 
 class CheckoutField {

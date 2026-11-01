@@ -21,6 +21,7 @@ class FakeServer {
   /// `/chat/cart` answer; [beforeCartReply] can hold it back.
   Map<String, dynamic> cartBody = {'cart': null, 'linked': false};
   Future<void> Function()? beforeCartReply;
+  Future<void> Function()? beforeHistoryReply;
   int? failChatOnceWith;
 
   /// The JSON body of the one-shot [failChatOnceWith] failure.
@@ -78,8 +79,10 @@ class FakeServer {
         await beforeChatReply?.call();
         return _json(chatReply);
       case '/chat/history':
-        return _json(historyBody ??
-            {'messages': historyRows, 'bot_paused_at': null, 'cart': historyCart, 'cart_linked': historyCartLinked});
+        final body = historyBody ??
+            {'messages': historyRows, 'bot_paused_at': null, 'cart': historyCart, 'cart_linked': historyCartLinked};
+        await beforeHistoryReply?.call();
+        return _json(body);
       case '/chat/cart':
         final body = cartBody; // the answer as of the request, however long it is held
         await beforeCartReply?.call();

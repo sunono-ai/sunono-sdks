@@ -302,10 +302,14 @@ class CartBar extends StatelessWidget {
                 child: Text.rich(
                   TextSpan(children: [
                     TextSpan(text: t.cart, style: theme.text(size: 13, weight: FontWeight.w700)),
-                    TextSpan(text: '  · ${t.items(cart.count)}', style: theme.text(size: 13, color: theme.muted)),
-                    if (cart.extraLineCount > 0)
+                    // The two numbers add up to the badge (cart.count).
+                    if (cart.count > cart.extraQty)
                       TextSpan(
-                          text: '  ${t.otherStoreItems(cart.extraLineCount)}',
+                          text: '  · ${t.items(cart.count - cart.extraQty)}',
+                          style: theme.text(size: 13, color: theme.muted)),
+                    if (cart.extraQty > 0)
+                      TextSpan(
+                          text: '  ${t.otherStoreItems(cart.extraQty)}',
                           style: theme.text(size: 12, color: theme.muted)),
                   ]),
                   maxLines: 1,

@@ -165,6 +165,84 @@ void main() {
     expect(cartEvents(), hasLength(n));
   });
 
+  test('overlapping pulls: the one asked for last wins even when it lands first', () async {
+    await c.open();
+    final gateA = Completer<void>();
+    server
+      ..cartBody = {'cart': _cart(1), 'linked': true}
+      ..beforeCartReply = () => gateA.future;
+    final a = c.refreshCart();
+    await server.until(() => server.count('/chat/cart') == 1);
+    server
+      ..cartBody = {'cart': _cart(2), 'linked': true}
+      ..beforeCartReply = null;
+    await c.refreshCart();
+    expect(c.cart!.count, 2);
+    gateA.complete();
+    await a;
+    expect(c.cart!.count, 2, reason: 'A is older than B');
+  });
+
+  test('a live cart update overtakes a pull in flight', () async {
+    await c.open();
+    await server.until(() => server.count('/chat/subscribe?') == 1);
+    final gate = Completer<void>();
+    server
+      ..cartBody = {'cart': _cart(1), 'linked': true}
+      ..beforeCartReply = () => gate.future;
+    final pull = c.refreshCart();
+    await server.until(() => server.count('/chat/cart') == 1);
+    server.pushLive('cart.updated', {'cart': _cart(3)});
+    await server.until(() => c.cart?.count == 3);
+    gate.complete();
+    await pull;
+    expect(c.cart!.count, 3);
+  });
+
+  test('a history response in flight does not overwrite a newer live cart', () async {
+    await c.open();
+    await server.until(() => server.count('/chat/subscribe?') == 1);
+    final gate = Completer<void>();
+    server
+      ..historyCart = _cart(1)
+      ..beforeHistoryReply = () => gate.future;
+    final h = c.refreshHistory();
+    await server.until(() => server.count('/chat/history') == 2);
+    server.pushLive('cart.updated', {'cart': _cart(3)});
+    await server.until(() => c.cart?.count == 3);
+    gate.complete();
+    await h;
+    expect(c.cart!.count, 3);
+  });
+
+  test('a probe in flight across a relink turn does not leave the link marked bound', () async {
+    await openBound();
+    bridge.probeGate = Completer<void>();
+    final gate = bridge.probeGate!;
+    c.resume(); // probes again
+    await server.until(() => bridge.probes == 2);
+    server
+      ..historyCartLinked = false
+      ..cartBody = {'cart': null, 'linked': false}
+      ..chatReply = _turn({'cart_relink': true});
+    await c.send('relink');
+    await c.refreshHistory();
+    gate.complete(); // the probe lands last and binds, but it started before the relink
+    await server.until(() => server.count('/widget/cart-binding') == 2);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    server.chatReply = _turn({});
+    await c.send('next');
+    expect(bridge.ensures, 1);
+  });
+
+  test('a legacy bare-array history does not unbind', () async {
+    await openBound();
+    server.historyBody = <Object>[];
+    await c.refreshHistory();
+    await c.send('again');
+    expect(bridge.ensures, 0);
+  });
+
   test('history changes the cart: event, not from sync', () async {
     server.historyCart = _cart(2);
     await c.open();
@@ -182,24 +260,43 @@ void main() {
     }))!;
     expect(cart.count, 6);
     expect(cart.extraLineCount, 2);
+    expect(cart.extraQty, 4);
     expect(SunonoCopy.of('en').otherStoreItems(2), '+2 other store items');
     expect(SunonoCopy.of('ar').otherStoreItems(2), '+2 قطع من المتجر');
   });
 
-  testWidgets('the cart bar names the other store items', (tester) async {
-    final cart = Cart(lines: const [], distinctCount: 1, extraLines: const [ExtraLine(sku: 'X', qty: 1)]);
+  testWidgets('the cart bar splits the badge into own items and other store items', (tester) async {
+    final cart = Cart(
+      lines: const [CartLine(productId: 'p', qty: 2)],
+      extraLines: const [ExtraLine(sku: 'X1', qty: 1), ExtraLine(sku: 'X2', qty: 3)],
+    );
+    expect(cart.count, 6);
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: CartBar(cart: cart, theme: const SunonoTheme(), lang: 'en', onTap: () {})),
     ));
-    expect(find.textContaining('+1 other store items'), findsOneWidget);
+    expect(find.textContaining('2 items'), findsOneWidget);
+    expect(find.textContaining('+4 other store items'), findsOneWidget);
+    expect(find.textContaining('6 items'), findsNothing,
+        reason: 'the two numbers add up to the badge, no double count');
     await tester.pumpWidget(const SizedBox());
   });
 }
 
 class _Bridge implements SunonoCartBridge {
   int ensures = 0;
+  int probes = 0;
+
+  /// Holds the next probe until completed.
+  Completer<void>? probeGate;
   @override
-  Future<Map<String, dynamic>?> probe(String userId) async => {'sig': 'p'};
+  Future<Map<String, dynamic>?> probe(String userId) async {
+    probes++;
+    final gate = probeGate;
+    probeGate = null;
+    if (gate != null) await gate.future;
+    return {'sig': 'p'};
+  }
+
   @override
   Future<Map<String, dynamic>?> ensureBind(String userId) async {
     ensures++;
