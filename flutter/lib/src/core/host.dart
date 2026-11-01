@@ -3,8 +3,8 @@ import 'dart:typed_data';
 import 'models.dart';
 
 /// Persists the anonymous shopper id across launches. Pass one backed by
-/// secure storage (e.g. `flutter_secure_storage`); the default forgets it on
-/// every cold start, which starts a new shopper each launch.
+/// secure storage (e.g. `flutter_secure_storage`); [MemoryStorage] forgets it
+/// on every cold start, which starts a new shopper each launch.
 abstract interface class SunonoStorage {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
@@ -40,8 +40,52 @@ class SunonoImage {
   final String filename;
 }
 
+/// Where the composer's attached photo is (`SunonoChatController.photo`).
+sealed class PhotoState {
+  const PhotoState();
+}
+
+/// No photo attached.
+class PhotoIdle extends PhotoState {
+  const PhotoIdle();
+}
+
+/// Uploading; [progress] is 0..1 of the request body handed to the network.
+class PhotoUploading extends PhotoState {
+  const PhotoUploading(this.progress);
+  final double progress;
+}
+
+/// Uploaded; the next message carries [ref] (the `image_ref`).
+class PhotoReady extends PhotoState {
+  const PhotoReady(this.ref);
+  final String ref;
+}
+
+/// The upload was refused or failed. [code] is the server's `error`
+/// (`image_too_large`, `invalid_image`, `image_blocked`, `image_unavailable`,
+/// …), `rate_limited`, or `offline`. `retryPhoto` re-uploads.
+class PhotoFailed extends PhotoState {
+  const PhotoFailed(this.code);
+  final String code;
+
+  /// False when the same photo would fail the same way (too large, unreadable,
+  /// refused, photos unavailable, customer blocked): only a different photo or
+  /// plain text helps, and a typed send then goes out without the photo.
+  bool get retryable => !const {
+        'image_too_large',
+        'invalid_image',
+        'image_blocked',
+        'image_unavailable',
+        'customer_blocked'
+      }.contains(code);
+}
+
 /// Navigation the assistant hands back to the host app.
-sealed class SunonoIntent {
+///
+/// Not sealed: new intents can be added in a minor release, so a host's
+/// `switch` should end with `default: return false;`.
+abstract class SunonoIntent {
   const SunonoIntent();
 }
 
@@ -70,16 +114,34 @@ class OpenUrlIntent extends SunonoIntent {
   final String url;
 }
 
-/// Things the host may want to react to.
-sealed class SunonoEvent {
+/// Open the host's screen for an order the assistant placed or reported on.
+/// Every field is optional; route by [storeOrderId] or [number] for a
+/// storefront order. [source] is `chat` (placed in the assistant) or
+/// `storefront`. Return false for a `chat` order and the assistant answers
+/// with the order's status instead.
+class OpenOrderIntent extends SunonoIntent {
+  const OpenOrderIntent({this.number, this.storeOrderId, this.publicId, this.source});
+  final String? number;
+  final String? storeOrderId;
+  final String? publicId;
+  final String? source;
+}
+
+/// Things the host may want to react to. Not sealed: end a `switch` with a default.
+abstract class SunonoEvent {
   const SunonoEvent();
 }
 
-/// The bot (or the storefront) changed the shopper's cart: refresh yours.
-/// [cart] is the latest snapshot when known.
+/// The shopper's cart changed (identity or count). [cart] is the latest snapshot.
 class CartChangedEvent extends SunonoEvent {
-  const CartChangedEvent(this.cart);
+  const CartChangedEvent(this.cart, {this.fromSync = false});
   final Cart? cart;
+
+  /// The storefront cart itself changed (the bot added or removed in the
+  /// store, a live update arrived, or a pull returned a different linked
+  /// cart). Hosts with a storefront cart refresh theirs when this is true;
+  /// badge-only hosts can just read `cart.count`.
+  final bool fromSync;
 }
 
 /// Analytics hook: `assistant_opened`, `assistant_message_sent`,
@@ -95,4 +157,14 @@ class ErrorEvent extends SunonoEvent {
   const ErrorEvent(this.error, [this.stackTrace]);
   final Object error;
   final StackTrace? stackTrace;
+}
+
+/// Reported through [ErrorEvent] when an intent has no handler and the SDK has
+/// no fallback of its own (open URL, checkout, a storefront order).
+class UnhandledIntent implements Exception {
+  const UnhandledIntent(this.intent);
+  final SunonoIntent intent;
+
+  @override
+  String toString() => 'UnhandledIntent(${intent.runtimeType})';
 }

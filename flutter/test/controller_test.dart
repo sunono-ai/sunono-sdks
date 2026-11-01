@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ import 'package:sunono/sunono.dart';
 import 'fake_server.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized(); // attach() follows the app lifecycle
   late FakeServer server;
   late SunonoChatController c;
   late List<SunonoEvent> events;
@@ -166,7 +168,8 @@ void main() {
     });
     await server.until(() => c.cart != null);
     await pumpEvents();
-    expect(c.messages.map((m) => m.role).toList(), [ChatRole.staff, ChatRole.system]);
+    expect(c.messages.map((m) => m.role).toList(), [ChatRole.system, ChatRole.staff],
+        reason: 'the pill sorts by bot_paused_at');
     expect(c.paused, isTrue);
     expect(c.cart!.count, 3);
     expect(events.whereType<CartChangedEvent>(), hasLength(1));
@@ -217,8 +220,10 @@ void main() {
 
   test('photo turn uploads then streams; stage updates the placeholder', () async {
     await c.open();
-    await c.send('شو هاد؟', image: SunonoImage(Uint8List.fromList([1, 2, 3])));
-    expect(server.count('/chat/upload'), 1);
+    await c.attachPhoto(SunonoImage(Uint8List.fromList([0xFF, 0xD8, 0xFF, 1, 2])));
+    expect(server.count('/chat/upload'), 1, reason: 'uploaded on pick');
+    await c.send('شو هاد؟');
+    expect(server.count('/chat/upload'), 1, reason: 'the send reuses the ref');
     expect(server.count('/chat/stream'), 1);
     expect(jsonDecode(server.bodies['/chat/stream']!.last)['image_ref'], 'img_ref_1');
     expect(c.messages.last.text, 'هاي الصورة');
@@ -291,6 +296,84 @@ void main() {
       expect(c.busy, isFalse);
     });
 
+    test('a 401 that lands after reset never replays the old message as the new shopper', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final gate = Completer<void>();
+      server.beforeChatReply = () => gate.future;
+      server.failChatOnceWith = 401;
+      final sending = c.send('old shopper');
+      await server.until(() => server.count('/chat') == 1);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([sending, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.bodies['/chat']!.where((b) => b.contains('old shopper')), hasLength(1));
+      expect(c.messages, isEmpty);
+    });
+
+    test('a 401 upload that lands after reset is not re-sent as the new shopper', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final gate = Completer<void>();
+      server.beforeUpload = () => gate.future;
+      server.failUploadOnce = (401, 'unauthorized');
+      final uploading = c.attachPhoto(SunonoImage(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0, 0, 0])));
+      await server.until(() => server.count('/chat/upload') == 1);
+      final resetting = c.reset();
+      server.beforeUpload = null;
+      gate.complete();
+      await Future.wait([uploading, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.count('/chat/upload'), 1);
+    });
+
+    test('a slow first-send cart ensure that a reset overtakes never sends the old message', () async {
+      final bridge = _GatedBridge();
+      final ctl = make(bridge: bridge);
+      await ctl.open();
+      await server.until(() => server.live != null);
+      final sending = ctl.send('old shopper');
+      await server.until(() => bridge.ensures == 1);
+      final resetting = ctl.reset();
+      bridge.gate.complete();
+      await Future.wait([sending, resetting]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(server.bodies['/chat'] ?? const [], isEmpty, reason: 'nothing sent as the new shopper');
+      expect(ctl.messages, isEmpty);
+      ctl.dispose();
+    });
+
+    test('a cart pull that a reset overtakes reports no error to the host', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final gate = Completer<void>();
+      server
+        ..beforeCartReply = (() => gate.future)
+        ..failCartOnceWith = 401;
+      final pulling = c.refreshCart();
+      await server.until(() => server.count('/chat/cart') == 1);
+      final resetting = c.reset();
+      gate.complete();
+      await Future.wait([pulling, resetting]);
+      expect(events.whereType<ErrorEvent>(), isEmpty);
+    });
+
+    test('a disposed controller never opens or resumes', () async {
+      final ctl = make();
+      ctl.dispose();
+      await ctl.open();
+      ctl.resume();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(server.requests, isEmpty);
+      expect(ctl.status, ChatStatus.idle);
+    });
+
+    test('sdkVersion is the pubspec version', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(sdkVersion, RegExp(r'^version:\s*(\S+)', multiLine: true).firstMatch(pubspec)![1]);
+    });
+
     test('concurrent first use mints exactly one shopper id', () async {
       final storage = MemoryStorage();
       final ctl = make(storage: storage, bridge: _Bridge());
@@ -347,6 +430,21 @@ void main() {
 }
 
 Future<void> pumpEvents() => Future<void>.delayed(Duration.zero);
+
+/// ensureBind waits for [gate]; probe has nothing to bind.
+class _GatedBridge implements SunonoCartBridge {
+  final gate = Completer<void>();
+  int ensures = 0;
+  @override
+  Future<Map<String, dynamic>?> probe(String userId) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> ensureBind(String userId) async {
+    ensures++;
+    await gate.future;
+    return {'sig': 'x'};
+  }
+}
 
 class _Bridge implements SunonoCartBridge {
   final calls = <String>[];

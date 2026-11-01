@@ -1,0 +1,33 @@
+{
+  "description": "Order placed with structured order ids.",
+  "response": {
+    "reply": "تم الطلب!",
+    "session_id": "s1",
+    "action_data": {
+      "order_placed": true,
+      "order": {
+        "order_number": "1042",
+        "items": [
+          {
+            "name_ar": "تمر مجهول",
+            "qty": 2,
+            "subtotal_fils": 16000
+          }
+        ],
+        "total_fils": 16500
+      },
+      "order_ids": {
+        "public_id": "ord_abc123",
+        "number": "1042",
+        "store_order_id": "000001042",
+        "source": "chat"
+      }
+    }
+  },
+  "expect": {
+    "public_id": "ord_abc123",
+    "number": "1042",
+    "store_order_id": "000001042",
+    "source": "chat"
+  }
+}

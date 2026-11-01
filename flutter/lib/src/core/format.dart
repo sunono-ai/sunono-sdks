@@ -71,4 +71,38 @@ String addToCartPhrase(String title, String lang) => lang == 'ar' ? 'ضيف "$ti
 String detailsPhrase(String title, String lang) =>
     lang == 'ar' ? 'احكيلي أكثر عن "$title"' : 'Tell me more about "$title"';
 
+String cartPhrase(String lang) => lang == 'en' ? "What's in my cart?" : 'شو يلي بالسلة؟';
+
+String orderStatusPhrase(String? number, String lang) => lang == 'en'
+    ? (number == null ? 'Where is my order?' : 'Where is my order $number?')
+    : (number == null ? 'وين صار طلبي؟' : 'وين صار طلبي $number؟');
+
 String showMorePhrase(String lang) => lang == 'en' ? 'Show me more' : 'ورجيني كمان';
+
+/// «09:05»: local time, 24 h, Latin digits in every language (no `intl`).
+String formatTime(DateTime t, String lang) {
+  final l = t.toLocal();
+  return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
+}
+
+// Unicode format characters (category Cf): bidi controls, zero-width, joiners.
+const _formatChars =
+    '\u00AD\u0600-\u0605\u061C\u06DD\u070F\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF';
+final _format = RegExp('[$_formatChars]');
+final _linkTail = RegExp('[.,;:!?)\\]}»؟،؛$_formatChars]+\$');
+
+/// [url] without the prose punctuation and invisible format characters that
+/// trail it in running text («…/p؟», «(…/p)», «…/p» + RLM).
+String trimLinkTail(String url) => url.replaceFirst(_linkTail, '');
+
+/// A link worth making tappable: `https://`, an ASCII host, no userinfo, and no
+/// hidden format characters (a bidi override can make `evil.com` read as another site).
+bool isSafeLink(String url) {
+  if (!url.startsWith('https://') || _format.hasMatch(url)) return false;
+  // Check the raw authority: Uri.host would percent-encode a non-ASCII name.
+  final authority = url.substring('https://'.length).split(RegExp('[/?#]')).first;
+  return authority.isNotEmpty &&
+      !authority.contains('@') &&
+      authority.codeUnits.every((c) => c < 128) &&
+      Uri.tryParse(url)?.host.isNotEmpty == true;
+}

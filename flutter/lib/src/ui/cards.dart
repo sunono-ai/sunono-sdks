@@ -6,75 +6,142 @@ import 'copy.dart';
 import 'theme.dart';
 
 /// Horizontally scrolling product cards for one turn.
+///
+/// Titles, money and options follow [lang] (the turn's reply language, which
+/// also sets the carousel's direction); buttons and badges follow [uiLang].
 class ProductCarousel extends StatelessWidget {
   const ProductCarousel({
     super.key,
     required this.products,
     required this.theme,
     required this.lang,
+    required this.uiLang,
     required this.onOpen,
-    required this.onSend,
+    required this.onAdd,
+    required this.onDetails,
     required this.busy,
+    this.addingRef,
   });
 
   final List<ProductCard> products;
   final SunonoTheme theme;
-
-  /// Content language (titles, money): the turn's reply language.
   final String lang;
+  final String uiLang;
   final void Function(ProductCard) onOpen;
-  final void Function(String text) onSend;
+  final void Function(ProductCard) onAdd;
+  final void Function(ProductCard) onDetails;
+
+  /// A turn is running: Add and Details are no-ops (the buttons keep their look).
   final bool busy;
 
+  /// The card whose Add started that turn: only its button spins.
+  final String? addingRef;
+
   @override
-  Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(
-        maxScaleFactor: 1.6,
-        child: Builder(builder: (context) {
-          // Image + padding are fixed; the text block grows with the font.
-          final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-          return SizedBox(
-            height: 204 + 72 * scale,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsetsDirectional.only(start: 4, end: 16, top: 4, bottom: 8),
-              itemCount: products.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => ProductTile(
-                product: products[i],
-                theme: theme,
-                lang: lang,
-                onOpen: () => onOpen(products[i]),
-                onAdd: busy ? null : () => onSend(addToCartPhrase(products[i].title(lang), lang)),
-              ),
+  Widget build(BuildContext context) => Directionality(
+        textDirection: lang == 'en' ? TextDirection.ltr : TextDirection.rtl,
+        child: MediaQuery.withClampedTextScaling(
+          maxScaleFactor: 1.6,
+          // Every card is as tall as the tallest one (the web's flex-stretch),
+          // so Add lines up along the bottom whatever the font scale.
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsetsDirectional.only(start: 4, end: 16, top: 4, bottom: 8),
+            child: IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                for (var i = 0; i < products.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  ProductTile(
+                    product: products[i],
+                    theme: theme,
+                    lang: lang,
+                    uiLang: uiLang,
+                    onOpen: () => onOpen(products[i]),
+                    onAdd: () {
+                      if (!busy) onAdd(products[i]);
+                    },
+                    onDetails: () {
+                      if (!busy) onDetails(products[i]);
+                    },
+                    adding: addingRef == products[i].publicId,
+                  ),
+                ],
+              ]),
             ),
-          );
-        }),
+          ),
+        ),
       );
 }
 
+/// A remote image decoded no larger than it is shown ([width] logical px at
+/// the device's pixel ratio), so a huge or hostile image can't balloon memory.
+/// A failed load shows [fallback], or a neutral broken-image icon.
+/// [semanticLabel] names the image for screen readers (a card's title).
+Widget boundedNetworkImage(BuildContext context, String url,
+        {required double width, Widget Function()? fallback, String? semanticLabel}) =>
+    Image.network(
+      url,
+      fit: BoxFit.cover,
+      semanticLabel: semanticLabel,
+      cacheWidth: (width * MediaQuery.devicePixelRatioOf(context)).ceil(),
+      errorBuilder: (_, __, ___) =>
+          fallback?.call() ?? const SizedBox(height: 80, child: Center(child: Icon(Icons.broken_image_outlined))),
+    );
+
+/// Prices, percentages and SKUs read left to right inside Arabic text.
+Widget _ltr(Widget child) => Directionality(textDirection: TextDirection.ltr, child: child);
+
 class ProductTile extends StatelessWidget {
-  const ProductTile(
-      {super.key, required this.product, required this.theme, required this.lang, required this.onOpen, this.onAdd});
+  const ProductTile({
+    super.key,
+    required this.product,
+    required this.theme,
+    required this.lang,
+    String? uiLang,
+    required this.onOpen,
+    this.onAdd,
+    this.onDetails,
+    this.adding = false,
+  }) : uiLang = uiLang ?? lang;
 
   final ProductCard product;
   final SunonoTheme theme;
+
+  /// Content language: title, money, options, chips.
   final String lang;
+
+  /// Chrome language: buttons and badges.
+  final String uiLang;
   final VoidCallback onOpen;
   final VoidCallback? onAdd;
+  final VoidCallback? onDetails;
+
+  /// This card's Add started the running turn.
+  final bool adding;
+
+  TextDirection _dir(String text) => isRtlText(text, fallbackRtl: lang != 'en') ? TextDirection.rtl : TextDirection.ltr;
 
   @override
   Widget build(BuildContext context) {
-    final t = SunonoCopy.of(lang);
+    final t = SunonoCopy.of(uiLang);
     final p = product;
+    final title = p.title(lang);
     final image = p.imageUrls.isEmpty ? null : p.imageUrls.first;
-    final price = p.preselectPriceJod ?? p.discountJod ?? p.priceFrom ?? p.priceJod;
-    final struck = p.preselectPriceJod == null && p.discountJod != null ? p.priceJod : null;
+    final price = p.shownPrice;
+    final struck = p.struckPrice;
+    final pct = p.salePct;
     final from = p.preselectPriceJod == null && p.priceFrom != null;
     final options = from ? p.optionsLine(lang) : '';
+    final label = p.preselectPriceJod == null ? null : p.preselectLabel(lang);
+    final stockBadge = !p.inStock
+        ? (t.unavailable, theme.muted)
+        : (p.lowStockQty ?? 0) > 0
+            ? (t.lowStock(p.lowStockQty!), theme.danger)
+            : null;
 
     return Semantics(
       button: true,
-      label: p.title(lang),
+      label: title,
       child: Container(
         width: 164,
         decoration: BoxDecoration(
@@ -93,50 +160,56 @@ class ProductTile extends StatelessWidget {
                 aspectRatio: 1.15,
                 child: Stack(fit: StackFit.expand, children: [
                   if (image != null)
-                    Image.network(image, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _noImage())
+                    boundedNetworkImage(context, image, width: 164, fallback: _noImage, semanticLabel: title)
                   else
                     _noImage(),
-                  if (!p.inStock)
-                    _badge(t.unavailable, theme.muted)
-                  else if (p.lowStockQty != null)
-                    _badge(t.lowStock(p.lowStockQty!), theme.danger)
-                  else if (struck != null)
-                    _badge(t.sale, theme.accent),
+                  if (stockBadge != null)
+                    PositionedDirectional(
+                      top: 8,
+                      start: 8,
+                      end: 44, // clear of the details button
+                      child: Align(
+                          alignment: AlignmentDirectional.centerStart, child: _badge(stockBadge.$1, stockBadge.$2)),
+                    ),
+                  if (onDetails != null) _detailsButton(t.detailsOf(title)),
                 ]),
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                  // No bottom padding: the Add button's 48 dp target supplies it.
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(p.title(lang),
+                    Text(title,
+                        textDirection: _dir(title),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.text(size: 13, weight: FontWeight.w600, height: 1.25)),
-                    if (options.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(options,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.text(size: 11, color: theme.muted)),
-                      ),
+                    if (label != null) _note(label),
+                    if (options.isNotEmpty) _note(options),
+                    if (p.chips.isNotEmpty) _chips(p.chips),
                     const Spacer(),
                     Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                      Text('${from ? '${t.from} ' : ''}${formatJod(price, lang)}',
+                      _ltr(Text('${from ? '${SunonoCopy.of(lang).from} ' : ''}${formatJod(price, lang)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.text(size: 14, weight: FontWeight.w700, color: theme.primary)),
+                          style: theme.text(size: 14, weight: FontWeight.w700, color: theme.primaryText))),
                       if (struck != null)
-                        Text(formatJod(struck, lang),
+                        _ltr(Text(formatJod(struck, lang),
                             maxLines: 1,
                             style: theme
                                 .text(size: 11, color: theme.muted)
-                                .copyWith(decoration: TextDecoration.lineThrough)),
+                                .copyWith(decoration: TextDecoration.lineThrough))),
+                      if (pct != null)
+                        _ltr(Text('-$pct%',
+                            maxLines: 1, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.danger))),
+                      if (from && p.onSale) _badge(t.sale, theme.accent),
                     ]),
-                    if (p.inStock) ...[
-                      const SizedBox(height: 6),
-                      _AddButton(theme: theme, label: t.addToCart, onTap: onAdd),
-                    ],
+                    _AddButton(
+                        theme: theme,
+                        label: p.inStock ? t.addToCart : t.unavailable,
+                        semanticLabel: '${p.inStock ? t.addToCart : t.unavailable}: $title',
+                        onTap: p.inStock ? onAdd : null,
+                        spinning: adding),
                   ]),
                 ),
               ),
@@ -147,55 +220,145 @@ class ProductTile extends StatelessWidget {
     );
   }
 
+  Widget _note(String text) => Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(text,
+            textDirection: _dir(text),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.text(size: 11, color: theme.muted)),
+      );
+
+  /// Up to three metadata values; at most two rows, whatever the text scale.
+  Widget _chips(List<String> chips) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Builder(builder: (context) {
+          final row = MediaQuery.textScalerOf(context).scale(10) * 1.3 + 6;
+          return ClipRect(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: row * 2 + 4),
+              child: Wrap(spacing: 4, runSpacing: 4, children: [
+                for (final c in chips.take(3))
+                  Container(
+                    constraints: const BoxConstraints(maxWidth: 140),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: theme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
+                    child: Text(c,
+                        textDirection: _dir(c),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.text(size: 10, color: theme.muted)),
+                  ),
+              ]),
+            ),
+          );
+        }),
+      );
+
   Widget _noImage() => DecoratedBox(
         decoration: BoxDecoration(gradient: theme.brandGradient.scale(0.15)),
         child: Icon(Icons.shopping_bag_outlined, color: theme.primary.withValues(alpha: 0.5)),
       );
 
-  Widget _badge(String label, Color color) => PositionedDirectional(
-        top: 8,
-        start: 8,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-          child: Text(label, style: theme.text(size: 11, weight: FontWeight.w600, color: Colors.white)),
-        ),
+  /// Stock status sits top-start; the sale badge sits top-end.
+  Widget _badge(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+        child: Text(label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.text(size: 11, weight: FontWeight.w600, color: onColor(color))),
       );
-}
 
-class _AddButton extends StatelessWidget {
-  const _AddButton({required this.theme, required this.label, this.onTap});
-  final SunonoTheme theme;
-  final String label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) => Opacity(
-        opacity: onTap == null ? 0.5 : 1,
-        child: Material(
-          color: Colors.transparent,
-          child: Ink(
-            height: 32,
-            decoration: BoxDecoration(gradient: theme.brandGradient, borderRadius: BorderRadius.circular(16)),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: onTap,
+  /// ⓘ on the image's top-end corner, as on the web.
+  Widget _detailsButton(String label) => PositionedDirectional(
+        top: 0,
+        end: 0,
+        child: Semantics(
+          container: true,
+          button: true,
+          label: label,
+          excludeSemantics: true,
+          child: InkWell(
+            onTap: onDetails,
+            customBorder: const CircleBorder(),
+            child: SizedBox(
+              width: 44,
+              height: 44,
               child: Center(
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.add_shopping_cart_rounded, size: 15, color: Colors.white),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.text(size: 12, weight: FontWeight.w600, color: Colors.white)),
-                  ),
-                ]),
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.9), shape: BoxShape.circle),
+                  child: Icon(Icons.info_outline_rounded, size: 18, color: theme.primary),
+                ),
               ),
             ),
           ),
         ),
       );
+}
+
+class _AddButton extends StatelessWidget {
+  const _AddButton(
+      {required this.theme, required this.label, required this.semanticLabel, this.onTap, this.spinning = false});
+  final SunonoTheme theme;
+  final String label;
+  final String semanticLabel;
+  final VoidCallback? onTap;
+  final bool spinning;
+
+  /// 32 dp to see, 48 dp to touch: the 8 dp above and below are the gap to
+  /// the price and the card's bottom padding.
+  @override
+  Widget build(BuildContext context) => Semantics(
+      container: true,
+      button: true,
+      enabled: onTap != null,
+      label: semanticLabel,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Opacity(
+            opacity: onTap == null ? 0.5 : 1,
+            child: Material(
+              color: Colors.transparent,
+              child: Ink(
+                height: 32,
+                decoration: BoxDecoration(gradient: theme.brandGradient, borderRadius: BorderRadius.circular(16)),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: onTap,
+                  child: Center(
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (spinning)
+                        // Reduce motion: a still glyph instead of a spinner.
+                        MediaQuery.disableAnimationsOf(context)
+                            ? Icon(Icons.hourglass_top_rounded, size: 15, color: theme.onPrimary)
+                            : SizedBox.square(
+                                dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: theme.onPrimary))
+                      else
+                        Icon(Icons.add_shopping_cart_rounded, size: 15, color: theme.onPrimary),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.text(size: 12, weight: FontWeight.w600, color: theme.onPrimary)),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
 }
 
 /// A rounded outline chip (show more, retry, starter prompts).
@@ -216,8 +379,9 @@ class SunonoChip extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (icon != null) ...[Icon(icon, size: 16, color: theme.primary), const SizedBox(width: 6)],
-              Flexible(child: Text(label, style: theme.text(size: 13, weight: FontWeight.w600, color: theme.primary))),
+              if (icon != null) ...[Icon(icon, size: 16, color: theme.primaryText), const SizedBox(width: 6)],
+              Flexible(
+                  child: Text(label, style: theme.text(size: 13, weight: FontWeight.w600, color: theme.primaryText))),
             ]),
           ),
         ),
@@ -248,9 +412,10 @@ class HandoffButton extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700, color: Colors.white))),
+                Flexible(
+                    child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700, color: theme.onPrimary))),
                 const SizedBox(width: 8),
-                const Icon(Icons.arrow_forward_rounded, size: 18, color: Colors.white),
+                Icon(Icons.arrow_forward_rounded, size: 18, color: theme.onPrimary),
               ]),
             ),
           ),
@@ -258,54 +423,76 @@ class HandoffButton extends StatelessWidget {
       );
 }
 
-/// The cart pill above the composer.
+/// The cart pill above the composer: the newest line (thumbnail + name), «+N»
+/// for every other unit, the total unless the sync withheld it. [onTap] null =
+/// disabled (a turn is running).
 class CartBar extends StatelessWidget {
   const CartBar({super.key, required this.cart, required this.theme, required this.lang, required this.onTap});
   final Cart cart;
   final SunonoTheme theme;
   final String lang;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = SunonoCopy.of(lang);
+    final last = cart.lines.isEmpty ? null : cart.lines.last;
+    final name = last == null ? t.cart : last.name(lang);
+    // Web CartCard: every unit but the featured one (a store-only cart has none).
+    final more = last == null ? cart.count : cart.count - 1;
+    final thumb = Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(color: theme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
+      clipBehavior: Clip.antiAlias,
+      child: last?.imageUrl == null
+          ? Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primaryText)
+          : boundedNetworkImage(context, last!.imageUrl!,
+              width: 32, fallback: () => Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primaryText)),
+    );
     return Semantics(
       button: true,
-      child: Material(
-        color: theme.surface,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
+      enabled: onTap != null,
+      child: Opacity(
+        opacity: onTap == null ? 0.6 : 1,
+        child: Material(
+          color: theme.surface,
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: theme.primary.withValues(alpha: 0.15)),
-            ),
-            child: Row(children: [
-              Icon(Icons.shopping_cart_outlined, size: 18, color: theme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(children: [
-                    TextSpan(text: t.cart, style: theme.text(size: 13, weight: FontWeight.w700)),
-                    TextSpan(text: '  · ${t.items(cart.count)}', style: theme.text(size: 13, color: theme.muted)),
-                  ]),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: theme.primary.withValues(alpha: 0.15)),
               ),
-              if (cart.totalFils != null)
-                Flexible(
-                  child: Text(formatFils(cart.totalFils, lang),
-                      textAlign: TextAlign.end,
-                      style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primary)),
+              child: Row(children: [
+                thumb,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.text(size: 13, weight: FontWeight.w700)),
                 ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded,
-                  size: 18, color: theme.muted, textDirection: Directionality.of(context)),
-            ]),
+                if (more > 0) ...[
+                  const SizedBox(width: 8),
+                  _ltr(Text('+$more', style: theme.text(size: 12, weight: FontWeight.w700, color: theme.muted))),
+                ],
+                if (cart.totalFils != null) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(formatFils(cart.totalFils, lang),
+                        textAlign: TextAlign.end,
+                        style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primaryText)),
+                  ),
+                ],
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded,
+                    size: 18, color: theme.muted, textDirection: Directionality.of(context)),
+              ]),
+            ),
           ),
         ),
       ),
@@ -331,8 +518,9 @@ class CheckoutCardView extends StatelessWidget {
     switch (checkout) {
       case CheckoutCollect(:final known, :final missing):
         title = t.collectTitle;
+        // Known: the value alone (the shopper just said it); missing: what's left.
         for (final f in known) {
-          rows.add(_row(f.label(contentLang), f.value ?? '', note: f.note, done: true));
+          rows.add(_known(f.value ?? ''));
         }
         for (final f in missing) {
           rows.add(_row(f.label(contentLang), t.pending, note: f.note, pending: true));
@@ -347,7 +535,7 @@ class CheckoutCardView extends StatelessWidget {
         ):
         title = amend ? t.amendTitle : t.confirmTitle;
         for (final d in details) {
-          rows.add(_row(d.label(contentLang), d.value ?? '', note: d.note));
+          rows.add(_row(d.label(contentLang), d.value ?? '', note: amend ? d.note : null));
         }
         if (savingsText != null) rows.add(_row(t.savings, savingsText, accent: true));
         if (totalText != null) {
@@ -374,6 +562,8 @@ class CheckoutCardView extends StatelessWidget {
         if ((p.vatFils ?? 0) > 0) rows.add(_small(t.vatIncluded(formatFils(p.vatFils, contentLang))));
     }
     final placed = checkout is CheckoutPlaced;
+    final c = checkout;
+    final amending = c is CheckoutReview && c.amend;
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(14),
@@ -385,8 +575,14 @@ class CheckoutCardView extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Icon(placed ? Icons.check_circle_rounded : Icons.receipt_long_rounded,
-              size: 18, color: placed ? theme.success : theme.primary),
+          Icon(
+              placed
+                  ? Icons.check_circle_rounded
+                  : amending
+                      ? Icons.edit_outlined
+                      : Icons.receipt_long_rounded,
+              size: 18,
+              color: placed ? theme.success : theme.primaryText),
           const SizedBox(width: 8),
           Expanded(child: Text(title, style: theme.text(size: 14, weight: FontWeight.w700))),
         ]),
@@ -396,15 +592,23 @@ class CheckoutCardView extends StatelessWidget {
     );
   }
 
-  Widget _row(String label, String value,
-          {String? note, bool done = false, bool pending = false, bool accent = false}) =>
-      Padding(
+  Widget _known(String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.check_rounded, size: 15, color: theme.success),
+          const SizedBox(width: 6),
+          Expanded(child: Text(value, style: theme.text(size: 13, weight: FontWeight.w600))),
+        ]),
+      );
+
+  Widget _row(String label, String value, {String? note, bool pending = false, bool accent = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (done) Icon(Icons.check_rounded, size: 15, color: theme.success),
-            if (pending) Icon(Icons.radio_button_unchecked_rounded, size: 14, color: theme.muted),
-            if (done || pending) const SizedBox(width: 6),
+            if (pending) ...[
+              Icon(Icons.radio_button_unchecked_rounded, size: 14, color: theme.muted),
+              const SizedBox(width: 6),
+            ],
             Expanded(child: Text(label, style: theme.text(size: 13, color: theme.muted))),
             const SizedBox(width: 12),
             Flexible(
@@ -429,7 +633,8 @@ class CheckoutCardView extends StatelessWidget {
           const SizedBox(width: 8),
           Flexible(
             child: Text(value,
-                textAlign: TextAlign.end, style: theme.text(size: 15, weight: FontWeight.w800, color: theme.primary)),
+                textAlign: TextAlign.end,
+                style: theme.text(size: 15, weight: FontWeight.w800, color: theme.primaryText)),
           ),
         ]),
       );

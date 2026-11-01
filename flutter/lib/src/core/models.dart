@@ -2,6 +2,8 @@
 // Every parser is lenient: unknown keys are ignored, missing optional keys
 // become null, and a wrong-typed field never throws.
 
+import 'dart:ui' show Color;
+
 T? _as<T>(Object? v) => v is T ? v : null;
 
 String? _str(Object? v) => v is String && v.isNotEmpty ? v : null;
@@ -49,6 +51,10 @@ class ProductCard {
     this.discountJod,
     this.priceFrom,
     this.preselectPriceJod,
+    this.preselectWasJod,
+    this.preselectLabelAr,
+    this.preselectLabelEn,
+    this.onSale = false,
     this.optionsSummary,
     this.options = const [],
     this.inStock = true,
@@ -62,6 +68,7 @@ class ProductCard {
     final hasImage = j['has_image'] != false;
     final pre = _map(j['preselect_line']);
     final prePrice = _int(pre['price_fils']);
+    final preWas = _int(pre['was_fils']);
     return ProductCard(
       publicId: _str(j['public_id']) ?? '',
       sku: _str(j['sku']),
@@ -71,6 +78,10 @@ class ProductCard {
       discountJod: _num(j['discount_jod']),
       priceFrom: _num(j['price_from']),
       preselectPriceJod: prePrice == null ? null : prePrice / 1000,
+      preselectWasJod: preWas == null ? null : preWas / 1000,
+      preselectLabelAr: _str(pre['label_ar']),
+      preselectLabelEn: _str(pre['label_en']),
+      onSale: j['on_sale'] == true,
       optionsSummary: _str(j['options_summary']),
       options: [
         for (final o in _maps(j['options']))
@@ -115,6 +126,14 @@ class ProductCard {
 
   /// A specific variant was named: quote its price, not [priceFrom].
   final double? preselectPriceJod;
+
+  /// The variant's price before its discount (`preselect_line.was_fils`).
+  final double? preselectWasJod;
+  final String? preselectLabelAr;
+  final String? preselectLabelEn;
+
+  /// The server flags the product as on sale (with [priceFrom]: the «عرض» badge).
+  final bool onSale;
   final String? optionsSummary;
   final List<ProductOption> options;
   final bool inStock;
@@ -124,6 +143,26 @@ class ProductCard {
   final List<String> chips;
 
   String title(String lang) => pickLang(titleAr, titleEn, lang) ?? '';
+
+  /// Which variant a preselected price is for («L / كحلي»), if the server said.
+  String? preselectLabel(String lang) => pickLang(preselectLabelAr, preselectLabelEn, lang);
+
+  /// The price shown in bold.
+  double? get shownPrice => preselectPriceJod ?? discountJod ?? priceFrom ?? priceJod;
+
+  /// The price shown struck through: the variant's `was`, or the list price
+  /// when a discount applies.
+  double? get struckPrice => preselectPriceJod != null ? preselectWasJod : (discountJod != null ? priceJod : null);
+
+  /// `round((1 - disc/orig) * 100)` of the list price vs [discountJod], only
+  /// when strictly between 0 and 100. A preselected variant's was→price gets
+  /// no percentage (as on the web).
+  int? get salePct {
+    final orig = priceJod, disc = discountJod;
+    if (preselectPriceJod != null || orig == null || disc == null || orig <= 0) return null;
+    final x = ((1 - disc / orig) * 100).round();
+    return x > 0 && x < 100 ? x : null;
+  }
 
   /// The one-line options text: the server's Arabic summary, or (English)
   /// built from [options] — in-stock values, then sold-out ones in brackets.
@@ -185,20 +224,33 @@ class CartLine {
   }
 }
 
+/// A synced-cart line the catalog doesn't know (`remote.extra_lines`, PROTOCOL §5.2).
+class ExtraLine {
+  const ExtraLine({this.sku, this.qty = 1, this.rowTotalFils});
+  final String? sku;
+  final int qty;
+  final int? rowTotalFils;
+}
+
 class Cart {
-  const Cart({required this.lines, this.distinctCount = 0, this.totalFils});
+  const Cart({required this.lines, this.distinctCount = 0, this.totalFils, this.extraLines = const []});
 
   /// `null` for an empty or missing cart.
   static Cart? fromJson(Object? raw) {
     if (raw is! Map) return null;
     final j = raw.cast<String, dynamic>();
     final lines = _maps(j['items']).map(CartLine.fromJson).toList();
-    if (lines.isEmpty && (_int(j['item_count']) ?? 0) == 0) return null;
+    final extra = [
+      for (final x in _maps(_map(j['remote'])['extra_lines']))
+        ExtraLine(sku: _str(x['sku']), qty: _int(x['qty']) ?? 1, rowTotalFils: _int(x['row_total_fils'])),
+    ];
+    if (lines.isEmpty && extra.isEmpty && (_int(j['item_count']) ?? 0) == 0) return null;
     final stale = j['stale'] == true;
     return Cart(
       lines: lines,
       distinctCount: _int(j['item_count']) ?? lines.length,
       totalFils: stale ? null : _int(j['total_fils']),
+      extraLines: extra,
     );
   }
 
@@ -208,8 +260,15 @@ class Cart {
   /// Null when the totals are withheld (a stale synced cart): show items only.
   final int? totalFils;
 
+  /// Storefront lines outside the catalog; they count toward [count].
+  final List<ExtraLine> extraLines;
+  int get extraLineCount => extraLines.length;
+
+  /// Pieces (summed qty) in the extra lines; part of [count].
+  int get extraQty => extraLines.fold(0, (s, x) => s + x.qty);
+
   /// What a shopper means by "how many things": sum of quantities.
-  int get count => lines.isEmpty ? distinctCount : lines.fold(0, (s, l) => s + l.qty);
+  int get count => (lines.isEmpty ? distinctCount : lines.fold(0, (s, l) => s + l.qty)) + extraQty;
 }
 
 class CheckoutField {
@@ -336,6 +395,17 @@ class CheckoutPlaced extends Checkout {
   final int? vatFils;
 }
 
+/// `action_data.order_ids` (PROTOCOL §4.1).
+class OrderIds {
+  const OrderIds({this.publicId, this.number, this.storeOrderId, this.source});
+  final String? publicId;
+  final String? number;
+  final String? storeOrderId;
+
+  /// `chat` or `storefront`.
+  final String? source;
+}
+
 /// The final payload of a turn: `/chat` JSON or the `done` frame (PROTOCOL §4.1).
 class TurnResult {
   const TurnResult({
@@ -352,12 +422,15 @@ class TurnResult {
     this.paused = false,
     this.blocked = false,
     this.typingHint,
+    this.relink = false,
+    this.orderIds,
   });
 
   factory TurnResult.fromJson(Map<String, dynamic> j) {
     final a = _map(j['action_data']);
     final cartRaw = a['cart_summary'] ?? a['cart'];
     final handoff = _str(_map(a['checkout_handoff'])['url']);
+    final ids = _map(a['order_ids']);
     return TurnResult(
       reply: _as<String>(j['reply']) ?? '',
       msgRef: _str(j['msg_ref']),
@@ -372,6 +445,15 @@ class TurnResult {
       paused: j['paused'] == true,
       blocked: j['blocked'] == true,
       typingHint: j['typing_hint'] is bool ? j['typing_hint'] as bool : null,
+      relink: _on(a['cart_relink']),
+      orderIds: ids.isEmpty
+          ? null
+          : OrderIds(
+              publicId: _str(ids['public_id']),
+              number: ids['number'] == null ? null : _str('${ids['number']}'),
+              storeOrderId: ids['store_order_id'] == null ? null : _str('${ids['store_order_id']}'),
+              source: _str(ids['source']),
+            ),
     );
   }
 
@@ -393,11 +475,20 @@ class TurnResult {
   final bool blocked;
   final bool? typingHint;
 
+  /// The storefront cart link was dropped: re-bind (PROTOCOL §8).
+  final bool relink;
+  final OrderIds? orderIds;
+
   /// Paused/blocked/silenced with nothing to say: render nothing, no retry.
   bool get silent => reply.trim().isEmpty;
 }
 
 /// `/widget/config` (PROTOCOL §3).
+Color? _hexColor(String? v) {
+  final m = v == null ? null : RegExp(r'^#([0-9a-fA-F]{6})$').firstMatch(v);
+  return m == null ? null : Color(0xFF000000 | int.parse(m[1]!, radix: 16));
+}
+
 class ShopConfig {
   const ShopConfig({
     this.enabled = true,
@@ -408,6 +499,10 @@ class ShopConfig {
     this.avatarUrl,
     this.defaultLanguage = 'ar',
     this.typingHint = true,
+    this.minSdkVersion,
+    this.disabledReason,
+    this.primaryColor,
+    this.colorScheme,
   });
 
   factory ShopConfig.fromJson(Map<String, dynamic> j) => ShopConfig(
@@ -419,6 +514,10 @@ class ShopConfig {
         avatarUrl: _isHttpUrl(_str(j['avatar_url'])) ? _str(j['avatar_url']) : null,
         defaultLanguage: _str(j['default_language']) == 'en' ? 'en' : 'ar',
         typingHint: j['typing_hint'] != false,
+        minSdkVersion: _str(_map(j['app'])['min_sdk_version']),
+        disabledReason: _str(j['reason']),
+        primaryColor: _hexColor(_str(j['primary_color'])),
+        colorScheme: switch (_str(j['color_scheme'])) { 'dark' => 'dark', 'light' => 'light', _ => null },
       );
 
   final bool enabled;
@@ -430,8 +529,22 @@ class ShopConfig {
   final String defaultLanguage;
   final bool typingHint;
 
+  /// Oldest SDK version the shop still supports (`app.min_sdk_version`).
+  final String? minSdkVersion;
+
+  /// Why `enabled` is false, e.g. `platform_disabled`.
+  final String? disabledReason;
+
+  /// The dashboard's brand color (`primary_color`, `#RRGGBB`).
+  final Color? primaryColor;
+
+  /// The dashboard's `color_scheme`: `light`, `dark`, or null when unset.
+  final String? colorScheme;
+
   String? title(String lang) => pickLang(titleAr, titleEn, lang);
-  String? welcome(String lang) => pickLang(welcomeAr, welcomeEn, lang);
+
+  /// The shop's welcome in [lang] only: never the other language's text.
+  String? welcome(String lang) => lang == 'en' ? welcomeEn : welcomeAr;
 }
 
 /// One row of `/chat/history?shape=v2`.
@@ -481,7 +594,7 @@ class HistoryRow {
 }
 
 class History {
-  const History({required this.rows, this.pausedAt, this.cart, this.cartLinked = false});
+  const History({required this.rows, this.pausedAt, this.cart, this.cartLinked = false, this.hasCartKey = true});
 
   factory History.fromJson(Object? raw, {String? apiOrigin}) {
     // Legacy bare-array shape is still accepted.
@@ -491,6 +604,7 @@ class History {
       pausedAt: DateTime.tryParse(_as<String>(j['bot_paused_at']) ?? ''),
       cart: Cart.fromJson(j['cart']),
       cartLinked: j['cart_linked'] == true,
+      hasCartKey: raw is Map && raw.containsKey('cart'),
     );
   }
 
@@ -498,4 +612,8 @@ class History {
   final DateTime? pausedAt;
   final Cart? cart;
   final bool cartLinked;
+
+  /// The response carried a `cart` key (even null = "no cart"). A legacy bare
+  /// array says nothing about the cart.
+  final bool hasCartKey;
 }

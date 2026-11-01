@@ -1,0 +1,14 @@
+{
+  "description": "Storefront cart link was dropped (cart_relink truthy): the SDK should re-bind (PROTOCOL §4.1, §8).",
+  "response": {
+    "reply": "ربطت السلة من جديد.",
+    "session_id": "s1",
+    "msg_ref": "msg_relink1",
+    "action_data": {
+      "cart_relink": true
+    }
+  },
+  "expect": {
+    "relink": true
+  }
+}

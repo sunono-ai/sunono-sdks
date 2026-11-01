@@ -54,7 +54,10 @@ class LiveConnection {
   void _teardown() {
     _retry?.cancel();
     _watchdog?.cancel();
-    _sub?.cancel();
+    // Closing the client errors the half-cancelled stream; that error lands in
+    // the cancel future, so drop it (we closed on purpose) instead of leaking
+    // an uncaught async error into the host's crash reporter.
+    _sub?.cancel().ignore();
     _close?.call();
     _retry = _watchdog = null;
     _sub = null;

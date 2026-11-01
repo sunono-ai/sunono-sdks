@@ -1,6 +1,8 @@
-# Sunono Client Protocol — v1
+# Sunono Client Protocol — v1.1
 
-The wire contract between a Sunono chat client (Flutter, React Native, Kotlin, Swift, and the web widget) and the Sunono backend. v1 is exactly what the production web widget speaks today. The backend treats every field here as **never-break**: fields may be added, never removed or renamed.
+The wire contract between a Sunono chat client (Flutter, React Native, Kotlin, Swift, and the web widget) and the Sunono backend. v1 is what the production web widget speaks. The backend treats every field here as **never-break**: fields may be added, never removed or renamed.
+
+**v1.1** is purely additive. Every v1.1 field is optional, and a client that ignores all of them still works. v1.1 adds: `channel: "app"` on init (§2), the `platform` config parameter, `app` block and `platform_disabled` (§3), structured taps, `client_message_id` and `403 platform_disabled` (§4), `cart_relink` and `order_ids` (§4.1), `remote.extra_lines` (§5.2), `503 image_unavailable` (§9) and `POST /chat/forget` (§11).
 
 Every SDK must pass the fixtures in [`fixtures/`](fixtures/). They are the conformance suite.
 
@@ -10,7 +12,7 @@ Every SDK must pass the fixtures in [`fixtures/`](fixtures/). They are the confo
 - **Shop key.** The shop's publishable key, `pk_…`, is the `{shop}` path segment and the `key` query/body field. It is public and safe to ship in an app.
 - **Headers on every request:**
   - `Origin: <appOrigin>`. Native clients only; see §1.
-  - `X-Sunono-Client: <sdk>/<version>`, e.g. `sunono-flutter/0.1.0`. Informational.
+  - `X-Sunono-Client: <sdk>/<version> (<platform>)`, e.g. `sunono-flutter/0.2.0 (ios)`; `<platform>` is `ios` or `android`. Informational.
   - `Authorization: Bearer <token>` on every endpoint that requires it.
 - **Money.**
   - Prices arrive as JOD numbers (`price_jod: 12.5`) or integer fils (`total_fils: 16500`, 1 JOD = 1000 fils).
@@ -28,7 +30,7 @@ Browsers set `Origin` themselves. Native apps send a configured **app origin** (
 - The shop's **allowed domains** (dashboard → Widget) must contain it. The chat endpoints refuse a request with no matching Origin once the shop has any allowed domain.
 - For Magento cart sync, the shop's **storefront origins** must contain it too, and the cart-binding proof's `origin` must equal it (§8).
 
-This is an anti-misconfiguration control, not authentication.
+The Origin and the allowed domains are an anti-misconfiguration control only. They are not authentication: any non-browser client can send any `Origin`, so never treat them as a secret or a security boundary.
 
 ## 2. Identity and token
 
@@ -36,25 +38,29 @@ This is an anti-misconfiguration control, not authentication.
 Request:
 
 ```json
-{ "user_id": "<uuid v4, optional>" }
+{ "user_id": "<uuid v4, optional>", "channel": "app" }
 ```
 
 Response:
 
 ```json
-{ "access_token": "<jwt>", "user_id": "<uuid>", "session_id": "<uuid>" }
+{ "access_token": "<jwt>", "user_id": "<uuid>", "session_id": "<uuid>", "channel": "app" }
 ```
+
+- **`channel`** (v1.1, optional). Native SDKs send `"app"` so the server can tell app traffic from web traffic (and apply the per-platform switch, §3). The response echoes it as `channel`. Omitted, it defaults to `web`.
 
 - **The anonymous shopper.** `user_id` is the durable anonymous shopper: cart, orders and history hang off it. The client generates it once (a UUID v4), persists it, and always sends the same one. A missing or invalid id is minted by the server; use the returned value.
 - **Token lifetime.** The token lives **15 minutes**. Clients cache it and re-call `/shops/init` with the same `user_id` when a call answers `401`, or `422` without a JSON `error` field (an invalid JWT). Upload's `422 {"error":"image_blocked"}` is not an auth failure.
-- **Rate limit.** Init is limited to 5 per minute per IP, so never call it per message.
+- **Rate limit.** Init is limited to 30 per minute per IP, so never call it per message.
 - `session_id` is informational. The server derives the conversation thread itself from activity (6 hours idle starts a new, empty thread).
 - **Logout / "clear chat".** Delete the stored `user_id`; the next init mints a new shopper.
 
 ## 3. Shop config
 
-### `GET /widget/config?key={shop}` (no auth)
+### `GET /widget/config?key={shop}&platform=ios|android` (no auth)
 Presentation only. It is cacheable (ETag, max-age 60).
+
+`platform` (v1.1, optional) is a **query parameter**, not a header: native SDKs send `platform=ios` or `platform=android`; the web widget omits it.
 
 ```json
 {
@@ -66,11 +72,15 @@ Presentation only. It is cacheable (ETag, max-age 60).
   "default_language": "ar",
   "color_scheme": "light",
   "launcher_position": "bottom-right", "launcher_icon": null,
-  "typing_hint": true
+  "typing_hint": true,
+  "app": { "min_sdk_version": "0.3.0" }
 }
 ```
 
 - `{"enabled": false}` is the **kill switch**. Show no chat entry point, and show a neutral "unavailable" state if the chat is already open.
+- `{"enabled": false, "reason": "platform_disabled"}` (v1.1) means the shop switched chat off for this platform only. Treat it exactly like the kill switch. Turns sent anyway answer `403 {"error":"platform_disabled"}` (§4).
+- `app.min_sdk_version` (v1.1, optional, `x.y.z`) is the oldest SDK version the shop still supports. An SDK older than it should degrade gracefully (for example, show an "update the app" notice) rather than fail.
+- `welcome_message_<lang>` is shown only in that language. There is no cross-language fallback: when it is missing, the SDK uses its own default welcome.
 - `typing_hint: false` means AI replies are currently off. Show no typing indicator after a send; staff may still answer over the live stream.
 - Native SDKs may ignore `primary_color`/`color_scheme`/`launcher_*` in favor of the host theme.
 
@@ -96,14 +106,22 @@ Request:
   "message": "بدي واقي شمس",
   "lang": "ar",
   "synthetic": false,
-  "image_ref": "<from /chat/upload, optional>"
+  "image_ref": "<from /chat/upload, optional>",
+  "client_message_id": "<uuid v4, optional>"
 }
 ```
 
-- **Do not send `channel`.** It defaults to `web`, the only valid value for v1 clients.
+- **`channel`.** Do not send it on chat requests; the channel comes from the token (`/shops/init`, §2).
 - `product_id` (optional) is a card's `public_id`, so a question is scoped to that product.
 - `lang` is the UI language hint (`ar`/`en`).
 - `synthetic: true` when the client generated the text (a tap on "add to cart", "show more", a starter prompt), so it isn't taken as the shopper's own words.
+- **Structured taps** (v1.1, optional). A card tap may also send:
+  - `action`: `add_to_cart` or `product_detail`.
+  - `action_ref`: the card's `public_id`.
+  - `product_sku`: the card's `sku`, when it has one.
+
+  Keep sending the synthetic `message`: it is what the shopper sees in the conversation, and an old server ignores the three fields. See `fixtures/tap_request.json`.
+- **`client_message_id`** (v1.1, optional). A UUID v4 the client mints once per message and reuses on every resend of that same message. While the turn is still running, a repeat answers `409 {"error":"turn_in_progress"}`; once it finished, a repeat answers `200` with the identical stored reply and does not run the turn again. This makes a resend safe (§10).
 
 Response: `text/event-stream`. Each frame is `data: <json>\n\n` (no `event:` line). Frames:
 
@@ -115,7 +133,8 @@ Response: `text/event-stream`. Each frame is `data: <json>\n\n` (no `event:` lin
 
 HTTP errors arrive before the stream:
 - `401`: re-init and resend once. The request was rejected before processing.
-- `403`: origin not allowed.
+- `403`: origin not allowed, or (v1.1) `{"error":"platform_disabled"}`: this shop turned chat off for app clients (§3). Show the "unavailable" state; don't retry.
+- `409`: `{"error":"turn_in_progress"}`, a `client_message_id` whose turn is still running. Wait and resend the same id.
 - `404`: unknown shop.
 - `429`: rate limited. Show "slow down", don't auto-retry.
 
@@ -155,6 +174,8 @@ HTTP errors arrive before the stream:
 | `order_confirm` / `order_amend` + `details`, `order_total_text`, `vat_text`, `savings_text`, `service_fee_text`, `field_notes` | §5.3 | Checkout read-back (confirm) or edit (amend). |
 | `order_placed` + `order` | §5.3 | Order placed in chat. |
 | `reply_lang` | `"ar"`/`"en"` | Language of `reply`. Product titles and money in this turn follow it. |
+| `cart_relink` | truthy | v1.1. The link to the shopper's storefront cart was dropped. Re-run the cart binding (§8). |
+| `order_ids` | `{public_id, number, store_order_id, source}` | v1.1. Ids of an order placed this turn. `source` is `chat` or `storefront`; every key is optional. `number` is the shopper-facing order number. |
 
 The four checkout keys are mutually exclusive per turn. Precedence when reading: `order_placed` > `order_confirm` > `order_amend` > `order_collect`. Every other `action_data` key is internal and must be ignored.
 
@@ -218,11 +239,15 @@ The title is the reply-language title.
   ],
   "item_count": 2,
   "total_fils": 16500,
-  "stale": true
+  "stale": true,
+  "remote": {
+    "extra_lines": [ { "sku": "SKU-X1", "qty": 1, "row_total_fils": 4000 } ]
+  }
 }
 ```
 
-- **Badge count.** Sum `qty` over `items`. Fall back to `item_count`, which counts distinct rows, not units.
+- **Badge count.** Sum `qty` over `items`, plus `qty` over `remote.extra_lines`. Fall back to `item_count`, which counts distinct rows, not units.
+- **Extra lines** (v1.1). `remote.extra_lines[]` (`{sku, qty, row_total_fils}`) are lines in the shopper's storefront cart that the catalog doesn't know. They count in the badge and in `total_fils`; the client has no name or image for them.
 - **Stale cart.** `stale: true` (or no `total_fils`) means the totals are withheld. Show the items only.
 - **Line name.** `name` + ` — ` + `variant_label` when present.
 - **Empty cart.** `null` or no `items`.
@@ -307,6 +332,8 @@ The server decides per turn. Clients render whatever arrives.
 
 The `done` frame and a live `message.new` for the same bot reply share `msg_ref` and may arrive in either order. The result must be exactly one bubble.
 
+**Product cards come from the turn, not the live stream.** Cards (with `sku`) arrive in the `/chat` response or the `/chat/stream` `done` frame. A live `message.new` carries text only (no cards, no `sku`), so when the `done` copy and the live copy are merged, keep the cards from the turn.
+
 ### `GET /shops/{shop}/chat/cart` (Bearer)
 Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on chat open/resume when `cart_linked`.
 
@@ -318,6 +345,7 @@ Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on cha
 
 - **The proof.** The proof is produced by the merchant's Magento module and signed with the shop's bind secret. Its fields: `v`, `shop_key`, `widget_user_id`, `origin`, `binding_ref` (`snb_…`), `store_code`, `issued_at`, `expires_at` (≤ 300 s after `issued_at`), `nonce` (32 hex), `sig` (64 hex).
 - **Origin.** The request's `Origin` header must equal `proof.origin`.
+- **Post exactly the 10 proof keys.** `v`, `shop_key`, `widget_user_id`, `origin`, `binding_ref`, `store_code`, `issued_at`, `expires_at`, `nonce`, `sig`, and nothing else. The server rejects a proof with extra keys, for example a GraphQL `__typename`, so build the object from this list rather than forwarding whatever the host returned.
 - **Answers:**
   - `{"bound": true|false, "replayed": bool}`
   - `{"bound": false}` when `proof` is null
@@ -328,19 +356,20 @@ Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on cha
 
 ## 9. Photos — `POST /shops/{shop}/chat/upload` (Bearer, multipart `image`; 10 per minute)
 
-- **Success:** `200 {"image_ref":"…","url":"…"}`. Then send a message with `image_ref`; a caption is required.
+- **Success:** `200 {"image_ref":"…"}`. Then send a message with `image_ref`; a caption is required.
 - **Errors:**
-  - `413 image_too_large`
+  - `413 image_too_large`: over 5 MB
   - `400 invalid_image`
   - `422 image_blocked`: moderation refused it
+  - `503 image_unavailable` (v1.1): moderation is unavailable right now. Nothing was stored; offer a retry.
   - `403 customer_blocked`
 - Resize to ≤ 1600 px on the long edge and JPEG ≈ 0.85 before upload.
 
 ## 10. Delivery semantics (mobile)
 
-There is no idempotency key, and resending can double an action ("add 2").
+Without a `client_message_id`, resending can double an action ("add 2"). Native clients send one on every turn (§4.0b); with it, a resend of the same message is safe: `409 turn_in_progress` while the turn runs, then an identical `200` replay. The recovery flow below is the fallback for servers or messages without it.
 
-- **`/chat/stream` (§4.0b) cancels the turn if the client disconnects mid-turn.** Nothing is saved, though cart side effects may already have happened. Native clients use it only for photo turns.
+- **`/chat/stream` (§4.0b) also finishes the turn if the client disconnects mid-turn**: the turn runs server-side and is saved. Recover through history, or resend with the same `client_message_id` for a replay. Older servers cancelled the turn on disconnect (nothing saved, though cart side effects may have happened), so a client must not assume a dropped stream left no trace. Native clients use it only for photo turns.
 - **Automatic resend is allowed only on `401`/`422`** (re-auth), which are rejected before any work.
 - **Any other failure without a response → "recovering":**
   - Re-fetch history at about 4 s, 12 s and 30 s. Both rows of a finished turn appear together.
@@ -350,3 +379,9 @@ There is no idempotency key, and resending can double an action ("add 2").
 - **Any `4xx`** (`429` rate limit or the shop's in-flight cap, `403`, `404`, `400`, `413`, `422` with an `error` code) is rejected before any work. Show a message plus a retry chip.
 - **A `5xx`** (e.g. a gateway timeout) can arrive after the turn ran, so treat it as ambiguous and recover.
 - **Silence is not an error.** An empty reply that is `paused`/`blocked`/silenced never shows a retry chip.
+
+## 11. Detach the device — `POST /shops/{shop}/chat/forget` (Bearer, body `{}`)
+
+- **Success:** `204`, no body.
+- **What it does.** It detaches this device from the shopper: the next `/shops/init` with the same `user_id` starts as a stranger. It is **not deletion**: the carts, orders and conversation stay on the server and the merchant keeps them.
+- **When to call it.** On the host's logout or "clear chat", best effort, before discarding the stored `user_id` and token (§2). Ignore a failure.

@@ -12,9 +12,41 @@ class FakeServer {
   Map<String, dynamic> config = {'enabled': true, 'header_title_ar': 'مساعد'};
   Map<String, dynamic> chatReply = {'reply': 'تمام', 'msg_ref': 'msg_ok', 'action_data': <String, dynamic>{}};
   List<Map<String, dynamic>> historyRows = [];
+  Object? historyCart;
+  bool historyCartLinked = false;
+
+  /// Replaces the whole history body (e.g. a legacy bare array).
+  Object? historyBody;
+
+  /// `/chat/cart` answer; [beforeCartReply] can hold it back.
+  Map<String, dynamic> cartBody = {'cart': null, 'linked': false};
+  Future<void> Function()? beforeCartReply;
+  Future<void> Function()? beforeHistoryReply;
   int? failChatOnceWith;
+
+  /// The JSON body of the one-shot [failChatOnceWith] failure.
+  Map<String, dynamic> failChatBody = {'message': 'nope'};
   bool dropChat = false;
   Future<void> Function()? beforeChatReply;
+  Future<void> Function()? beforeConfig;
+  Future<void> Function()? beforeStream;
+
+  /// One-shot `/chat/cart` failure status.
+  int? failCartOnceWith;
+  Future<void> Function()? beforeUpload;
+
+  /// One-shot `/chat/upload` failure `(status, error code)`.
+  (int, String)? failUploadOnce;
+
+  /// `/chat/stream` answers [failStreamWith] with [failStreamBody], [failStreamTimes] times.
+  int? failStreamWith;
+  int failStreamTimes = 0;
+  Map<String, dynamic> failStreamBody = {'error': 'bad_request'};
+
+  /// `/chat/forget` answers [failForgetWith] this many times, then 204.
+  int failForgetTimes = 0;
+  int failForgetWith = 500;
+  Future<void> Function()? beforeForget;
   StreamController<List<int>>? live;
   int _tokens = 0;
 
@@ -54,29 +86,60 @@ class FakeServer {
         final uid = (jsonDecode(body) as Map)['user_id'] ?? '00000000-0000-4000-8000-000000000000';
         return _json({'access_token': 'tok${++_tokens}', 'user_id': uid, 'session_id': 's'});
       case '/widget/config':
+        await beforeConfig?.call();
         return _json(config);
       case '/chat':
         if (dropChat) throw http.ClientException('Connection reset by peer');
+        await beforeChatReply?.call();
         if (failChatOnceWith != null) {
           final s = failChatOnceWith!;
           failChatOnceWith = null;
-          return _json({'message': 'nope'}, s);
+          return _json(failChatBody, s);
         }
-        await beforeChatReply?.call();
         return _json(chatReply);
       case '/chat/history':
-        return _json({'messages': historyRows, 'bot_paused_at': null, 'cart': null, 'cart_linked': false});
+        final body = historyBody ??
+            {'messages': historyRows, 'bot_paused_at': null, 'cart': historyCart, 'cart_linked': historyCartLinked};
+        await beforeHistoryReply?.call();
+        return _json(body);
+      case '/chat/cart':
+        final body = cartBody; // the answer as of the request, however long it is held
+        await beforeCartReply?.call();
+        if (failCartOnceWith != null) {
+          final s = failCartOnceWith!;
+          failCartOnceWith = null;
+          return _json({'message': 'nope'}, s);
+        }
+        return _json(body);
       case '/chat/subscribe-ticket':
         return _json({'ticket': 't'});
       case '/chat/subscribe?':
         live = StreamController<List<int>>();
         return http.StreamedResponse(live!.stream, 200);
       case '/chat/upload':
-        return _json({'image_ref': 'img_ref_1', 'url': 'https://cdn.test/p.jpg'});
+        await beforeUpload?.call();
+        if (failUploadOnce != null) {
+          final (status, code) = failUploadOnce!;
+          failUploadOnce = null;
+          return _json({'error': code}, status);
+        }
+        return _json({'image_ref': 'img_ref_${count('/chat/upload')}'});
       case '/chat/stream':
+        await beforeStream?.call();
+        if (failStreamTimes > 0) {
+          failStreamTimes--;
+          return _json(failStreamBody, failStreamWith!);
+        }
         const frames = 'data: {"type":"stage","stage":"understand"}\n\n'
             'data: {"type":"done","reply":"هاي الصورة","msg_ref":"msg_p","action_data":{}}\n\n';
         return http.StreamedResponse(Stream.value(utf8.encode(frames)), 200);
+      case '/chat/forget':
+        await beforeForget?.call();
+        if (failForgetTimes > 0) {
+          failForgetTimes--;
+          return _json({'error': 'nope'}, failForgetWith);
+        }
+        return http.StreamedResponse(const Stream.empty(), 204);
       case '/widget/cart-binding':
         return _json({'bound': true, 'replayed': false});
     }

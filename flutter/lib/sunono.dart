@@ -16,11 +16,13 @@ export 'src/core/models.dart'
         ProductCard,
         Cart,
         CartLine,
+        ExtraLine,
         Checkout,
         CheckoutCollect,
         CheckoutReview,
         CheckoutPlaced,
         CheckoutField,
+        OrderIds,
         ShopConfig;
 export 'src/sunono.dart';
 export 'src/ui/chat_view.dart' show SunonoChatView;
