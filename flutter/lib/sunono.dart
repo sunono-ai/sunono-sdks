@@ -16,6 +16,7 @@ export 'src/core/models.dart'
         ProductCard,
         Cart,
         CartLine,
+        ExtraLine,
         Checkout,
         CheckoutCollect,
         CheckoutReview,

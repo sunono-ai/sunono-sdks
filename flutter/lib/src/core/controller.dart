@@ -140,6 +140,10 @@ class SunonoChatController extends ChangeNotifier {
   bool _busy = false;
   bool _bound = false;
   bool _ensureTried = false;
+
+  /// Bumped by every live cart write (turn, `cart.updated`): a pull or a
+  /// history response that started before one is older than it, so it's dropped.
+  int _cartSeq = 0;
   bool _disposed = false;
   int _seq = 0;
 
@@ -308,10 +312,49 @@ class SunonoChatController extends ChangeNotifier {
 
   /// Re-run the cart binding (after host login/logout/cart replacement).
   Future<void> refreshCartBinding() {
-    _bound = false;
-    _ensureTried = false;
+    _unbind();
     return _bind(ensure: false);
   }
+
+  /// The link is gone (or must be remade): the next send ensures again.
+  void _unbind() {
+    _bound = false;
+    _ensureTried = false;
+  }
+
+  /// Follow the server's word on the link. A link that drops re-arms the
+  /// once-per-open ensure.
+  void _setBound(bool linked) {
+    if (!linked && _bound) _ensureTried = false;
+    _bound = linked;
+  }
+
+  /// Pull the cart from the server. The host calls this after its own cart
+  /// edits so the bot sees them; a pull that a newer live write overtakes is dropped.
+  Future<void> refreshCart() async {
+    final epoch = _epoch, seq = _cartSeq;
+    try {
+      final c = await _session.authed(_api.cart);
+      if (epoch != _epoch || _disposed || seq != _cartSeq) return;
+      _setBound(c.linked);
+      _setCart(c.cart, fromSync: c.linked && _cartSig(c.cart) != _cartSig(_cart));
+      _changed();
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s));
+    }
+  }
+
+  /// Replace the cart; tell the host when it changed (or [fromSync]).
+  void _setCart(Cart? next, {bool fromSync = false}) {
+    final changed = _cartSig(next) != _cartSig(_cart);
+    _cart = next;
+    if (changed || fromSync) _emit(CartChangedEvent(next, fromSync: fromSync));
+  }
+
+  static String _cartSig(Cart? c) => c == null
+      ? ''
+      : '${c.count}|${c.totalFils}|${c.extraLineCount}|'
+          '${c.lines.map((l) => '${l.productId}:${l.variantLabel}:${l.qty}').join(',')}';
 
   Future<void> _bind({required bool ensure}) async {
     final bridge = cartBridge;
@@ -322,7 +365,7 @@ class SunonoChatController extends ChangeNotifier {
       final proof = ensure ? await bridge.ensureBind(uid) : await bridge.probe(uid);
       if (proof == null || epoch != _epoch) return;
       final bound = await _api.bindCart(uid, proof);
-      if (epoch == _epoch) _bound = bound;
+      if (epoch == _epoch) _setBound(bound);
     } catch (e, s) {
       if (e is SunonoHttpException && e.isPlatformDisabled) _disable('platform_disabled');
       _emit(ErrorEvent(e, s)); // never loops: next open/resume/refresh tries again
@@ -439,10 +482,13 @@ class SunonoChatController extends ChangeNotifier {
 
   void _apply(ChatMessage bot, TurnResult r) {
     if (r.typingHint != null) _typingHint = r.typingHint!;
+    if (r.cartPresent || r.cartMutated) _cartSeq++;
     if (r.cartPresent) {
-      _cart = r.cart;
+      _setCart(r.cart, fromSync: r.cartMutated);
+    } else if (r.cartMutated) {
+      _emit(CartChangedEvent(_cart, fromSync: true));
     }
-    if (r.cartMutated) _emit(CartChangedEvent(_cart));
+    if (r.relink) _unbind(); // the server dropped the link: ensure again next send
     if (r.silent && r.checkout == null && r.products.isEmpty) {
       _messages.remove(bot); // paused / blocked / silenced: say nothing
       return;
@@ -561,6 +607,7 @@ class SunonoChatController extends ChangeNotifier {
   /// row's msg_ref, so device-vs-server clock skew never matters).
   Future<void> refreshHistory() async {
     final epoch = _epoch;
+    final seq = _cartSeq;
     final h = await _session.authed(_api.history);
     if (epoch != _epoch || _disposed) return;
     if (_messages.isEmpty) {
@@ -592,18 +639,9 @@ class SunonoChatController extends ChangeNotifier {
         return m.state == MessageState.recovering && m._outgoing?.user.msgRef != null;
       });
     }
-    _applyHistoryMeta(h);
+    _applyHistoryMeta(h, cartStale: seq != _cartSeq);
     _changed();
-    if (h.cartLinked) {
-      try {
-        final c = await _session.authed(_api.cart);
-        if (epoch != _epoch) return;
-        _cart = c.cart;
-        _changed();
-      } catch (e, s) {
-        _emit(ErrorEvent(e, s));
-      }
-    }
+    if (h.cartLinked && seq == _cartSeq) await refreshCart();
   }
 
   /// Legacy rows without msg_ref: same role + text within 15 s.
@@ -612,9 +650,13 @@ class SunonoChatController extends ChangeNotifier {
       m.text == r.text &&
       (r.ts == null || m.ts.difference(r.ts!).abs() < const Duration(seconds: 15)));
 
-  void _applyHistoryMeta(History h) {
+  /// [cartStale]: a live cart write landed while [h] was in flight, so its
+  /// cart and link state are older than what we hold.
+  void _applyHistoryMeta(History h, {bool cartStale = false}) {
     _paused = h.pausedAt != null;
-    _cart = h.cart; // the server's cart row is the truth, empty included
+    if (cartStale) return;
+    _setBound(h.cartLinked);
+    if (h.hasCartKey) _setCart(h.cart); // the server's cart row is the truth, empty included
   }
 
   void _onLive(String type, Map<String, dynamic> data) {
@@ -645,8 +687,8 @@ class SunonoChatController extends ChangeNotifier {
       case 'assistant.state':
         _typingHint = data['typing_hint'] != false;
       case 'cart.updated':
-        _cart = Cart.fromJson(data['cart']);
-        _emit(CartChangedEvent(_cart));
+        _cartSeq++;
+        _setCart(Cart.fromJson(data['cart']), fromSync: true);
       default:
         return; // forward compatibility: unknown events are ignored
     }
@@ -667,6 +709,7 @@ class SunonoChatController extends ChangeNotifier {
   void checkout(String? url) {
     _emit(const AnalyticsEvent('assistant_checkout_tapped'));
     _hand(CheckoutIntent(url: url));
+    _unbind(); // the order completes on the storefront and rotates its cart
   }
 
   void openUrl(String url) => _hand(OpenUrlIntent(url));

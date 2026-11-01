@@ -536,7 +536,7 @@ class HistoryRow {
 }
 
 class History {
-  const History({required this.rows, this.pausedAt, this.cart, this.cartLinked = false});
+  const History({required this.rows, this.pausedAt, this.cart, this.cartLinked = false, this.hasCartKey = true});
 
   factory History.fromJson(Object? raw, {String? apiOrigin}) {
     // Legacy bare-array shape is still accepted.
@@ -546,6 +546,7 @@ class History {
       pausedAt: DateTime.tryParse(_as<String>(j['bot_paused_at']) ?? ''),
       cart: Cart.fromJson(j['cart']),
       cartLinked: j['cart_linked'] == true,
+      hasCartKey: raw is Map && raw.containsKey('cart'),
     );
   }
 
@@ -553,4 +554,8 @@ class History {
   final DateTime? pausedAt;
   final Cart? cart;
   final bool cartLinked;
+
+  /// The response carried a `cart` key (even null = "no cart"). A legacy bare
+  /// array says nothing about the cart.
+  final bool hasCartKey;
 }

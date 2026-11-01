@@ -12,6 +12,15 @@ class FakeServer {
   Map<String, dynamic> config = {'enabled': true, 'header_title_ar': 'مساعد'};
   Map<String, dynamic> chatReply = {'reply': 'تمام', 'msg_ref': 'msg_ok', 'action_data': <String, dynamic>{}};
   List<Map<String, dynamic>> historyRows = [];
+  Object? historyCart;
+  bool historyCartLinked = false;
+
+  /// Replaces the whole history body (e.g. a legacy bare array).
+  Object? historyBody;
+
+  /// `/chat/cart` answer; [beforeCartReply] can hold it back.
+  Map<String, dynamic> cartBody = {'cart': null, 'linked': false};
+  Future<void> Function()? beforeCartReply;
   int? failChatOnceWith;
 
   /// The JSON body of the one-shot [failChatOnceWith] failure.
@@ -69,7 +78,12 @@ class FakeServer {
         await beforeChatReply?.call();
         return _json(chatReply);
       case '/chat/history':
-        return _json({'messages': historyRows, 'bot_paused_at': null, 'cart': null, 'cart_linked': false});
+        return _json(historyBody ??
+            {'messages': historyRows, 'bot_paused_at': null, 'cart': historyCart, 'cart_linked': historyCartLinked});
+      case '/chat/cart':
+        final body = cartBody; // the answer as of the request, however long it is held
+        await beforeCartReply?.call();
+        return _json(body);
       case '/chat/subscribe-ticket':
         return _json({'ticket': 't'});
       case '/chat/subscribe?':

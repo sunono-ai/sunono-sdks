@@ -303,6 +303,10 @@ class CartBar extends StatelessWidget {
                   TextSpan(children: [
                     TextSpan(text: t.cart, style: theme.text(size: 13, weight: FontWeight.w700)),
                     TextSpan(text: '  · ${t.items(cart.count)}', style: theme.text(size: 13, color: theme.muted)),
+                    if (cart.extraLineCount > 0)
+                      TextSpan(
+                          text: '  ${t.otherStoreItems(cart.extraLineCount)}',
+                          style: theme.text(size: 12, color: theme.muted)),
                   ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

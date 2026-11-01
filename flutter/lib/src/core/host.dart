@@ -75,11 +75,16 @@ sealed class SunonoEvent {
   const SunonoEvent();
 }
 
-/// The bot (or the storefront) changed the shopper's cart: refresh yours.
-/// [cart] is the latest snapshot when known.
+/// The shopper's cart changed (identity or count). [cart] is the latest snapshot.
 class CartChangedEvent extends SunonoEvent {
-  const CartChangedEvent(this.cart);
+  const CartChangedEvent(this.cart, {this.fromSync = false});
   final Cart? cart;
+
+  /// The storefront cart itself changed (the bot added or removed in the
+  /// store, a live update arrived, or a pull returned a different linked
+  /// cart). Hosts with a storefront cart refresh theirs when this is true;
+  /// badge-only hosts can just read `cart.count`.
+  final bool fromSync;
 }
 
 /// Analytics hook: `assistant_opened`, `assistant_message_sent`,
