@@ -53,7 +53,9 @@ class SunonoChatView extends StatefulWidget {
 class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _focus = FocusNode();
-  SunonoImage? _photo;
+
+  /// The shopper tapped Send on a photo with no caption: say what is missing.
+  bool _needCaption = false;
   bool _sentInitial = false;
 
   SunonoChatController get _c => widget.controller;
@@ -64,7 +66,9 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
     WidgetsBinding.instance.addObserver(this);
     _c.addListener(_onChange);
     _c.attach();
-    _input.addListener(() => setState(() {}));
+    _input.addListener(() => setState(() {
+          if (_input.text.trim().isNotEmpty) _needCaption = false;
+        }));
     // The controller may already be live (e.g. a sheet over the chat tab):
     // no change notification would come to send the initial message.
     WidgetsBinding.instance.addPostFrameCallback((_) => _onChange());
@@ -113,15 +117,32 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
 
   Future<void> _attach() async {
     final picked = await widget.pickImage?.call();
-    if (picked != null && mounted) setState(() => _photo = picked);
+    if (picked != null && mounted) {
+      setState(() => _needCaption = false);
+      await _c.attachPhoto(picked);
+    }
+  }
+
+  void _removePhoto() {
+    _c.removePhoto();
+    setState(() => _needCaption = false);
   }
 
   void _send() {
     final text = _input.text.trim();
-    if (text.isEmpty || _c.busy) return;
-    _c.send(text, image: _photo);
+    if (_c.busy || _c.status != ChatStatus.ready) return;
+    final photo = _c.photo.value;
+    if (photo is! PhotoIdle) {
+      if (photo is! PhotoReady) return; // still uploading, or failed (shown under the preview)
+      if (text.isEmpty) {
+        setState(() => _needCaption = true);
+        return;
+      }
+    }
+    if (text.isEmpty) return;
+    _c.send(text);
     _input.clear();
-    setState(() => _photo = null);
+    setState(() => _needCaption = false);
   }
 
   @override
@@ -194,17 +215,25 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
               onTap: _c.busy ? null : _c.openCart,
             ),
           ),
-        _Composer(
-          theme: theme,
-          controller: _input,
-          focus: _focus,
-          hint: _photo != null ? t.photoCaptionHint : t.inputHint,
-          canSend: _input.text.trim().isNotEmpty && !_c.busy && _c.status == ChatStatus.ready,
-          onSend: _send,
-          onAttach: widget.pickImage == null ? null : _attach,
-          photo: _photo,
-          onRemovePhoto: () => setState(() => _photo = null),
-          copy: t,
+        ValueListenableBuilder<PhotoState>(
+          valueListenable: _c.photo,
+          builder: (context, photo, _) => _Composer(
+            theme: theme,
+            controller: _input,
+            focus: _focus,
+            hint: photo is PhotoIdle ? t.inputHint : t.photoCaptionHint,
+            canSend: !_c.busy &&
+                _c.status == ChatStatus.ready &&
+                (photo is PhotoIdle ? _input.text.trim().isNotEmpty : photo is PhotoReady),
+            onSend: _send,
+            onAttach: widget.pickImage == null ? null : _attach,
+            photo: photo,
+            image: _c.photoImage,
+            needCaption: _needCaption,
+            onRemovePhoto: _removePhoto,
+            onRetryPhoto: _c.retryPhoto,
+            copy: t,
+          ),
         ),
       ]);
     }
@@ -642,7 +671,10 @@ class _Composer extends StatelessWidget {
     required this.onSend,
     required this.onAttach,
     required this.photo,
+    required this.image,
+    required this.needCaption,
     required this.onRemovePhoto,
+    required this.onRetryPhoto,
     required this.copy,
   });
 
@@ -653,8 +685,11 @@ class _Composer extends StatelessWidget {
   final bool canSend;
   final VoidCallback onSend;
   final VoidCallback? onAttach;
-  final SunonoImage? photo;
+  final PhotoState photo;
+  final SunonoImage? image;
+  final bool needCaption;
   final VoidCallback onRemovePhoto;
+  final VoidCallback onRetryPhoto;
   final SunonoCopy copy;
 
   @override
@@ -668,7 +703,7 @@ class _Composer extends StatelessWidget {
           border: Border.all(color: theme.primary.withValues(alpha: 0.12)),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (photo != null)
+          if (photo is! PhotoIdle && image != null) ...[
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: Padding(
@@ -676,8 +711,37 @@ class _Composer extends StatelessWidget {
                 child: Stack(clipBehavior: Clip.none, children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.memory(photo!.bytes, width: 64, height: 64, fit: BoxFit.cover),
+                    child: Image.memory(
+                      image!.bytes,
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                      // Magic bytes pass but the pixels may not decode: still removable.
+                      errorBuilder: (_, __, ___) =>
+                          SizedBox(width: 64, height: 64, child: Icon(Icons.broken_image_outlined, color: theme.muted)),
+                    ),
                   ),
+                  if (photo case PhotoUploading(:final progress))
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: ColoredBox(
+                          color: Colors.black38,
+                          child: Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(
+                                value: progress,
+                                strokeWidth: 3,
+                                color: Colors.white,
+                                semanticsLabel: copy.uploadingPhoto((progress * 100).round()),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   PositionedDirectional(
                     top: -8,
                     end: -8,
@@ -692,6 +756,32 @@ class _Composer extends StatelessWidget {
                 ]),
               ),
             ),
+            if (photo case PhotoFailed(:final code))
+              Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 10, 4),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
+                      Text(copy.photoError(code), style: theme.text(size: 13, color: theme.danger)),
+                      if (copy.photoRetryable(code)) TextButton(onPressed: onRetryPhoto, child: Text(copy.retry)),
+                    ]),
+                  ),
+                ),
+              ),
+            if (needCaption)
+              Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 10, 4),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(copy.photoCaptionHint, style: theme.text(size: 13, color: theme.danger)),
+                  ),
+                ),
+              ),
+          ],
           Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
             if (onAttach != null)
               IconButton(
@@ -710,6 +800,7 @@ class _Composer extends StatelessWidget {
                 style: theme.text(size: 15),
                 decoration: InputDecoration(
                   hintText: hint,
+                  hintMaxLines: 1, // a wrapped hint at 200% text would eat the screen
                   hintStyle: theme.text(size: 15, color: theme.muted),
                   border: InputBorder.none,
                   isDense: true,

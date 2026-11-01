@@ -40,6 +40,36 @@ class SunonoImage {
   final String filename;
 }
 
+/// Where the composer's attached photo is (`SunonoChatController.photo`).
+sealed class PhotoState {
+  const PhotoState();
+}
+
+/// No photo attached.
+class PhotoIdle extends PhotoState {
+  const PhotoIdle();
+}
+
+/// Uploading; [progress] is 0..1 of the request body handed to the network.
+class PhotoUploading extends PhotoState {
+  const PhotoUploading(this.progress);
+  final double progress;
+}
+
+/// Uploaded; the next message carries [ref] (the `image_ref`).
+class PhotoReady extends PhotoState {
+  const PhotoReady(this.ref);
+  final String ref;
+}
+
+/// The upload was refused or failed. [code] is the server's `error`
+/// (`image_too_large`, `invalid_image`, `image_blocked`, `image_unavailable`,
+/// …), `rate_limited`, or `offline`. `retryPhoto` re-uploads.
+class PhotoFailed extends PhotoState {
+  const PhotoFailed(this.code);
+  final String code;
+}
+
 /// Navigation the assistant hands back to the host app.
 ///
 /// Not sealed: new intents can be added in a minor release, so a host's

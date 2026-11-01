@@ -218,8 +218,10 @@ void main() {
 
   test('photo turn uploads then streams; stage updates the placeholder', () async {
     await c.open();
-    await c.send('شو هاد؟', image: SunonoImage(Uint8List.fromList([1, 2, 3])));
-    expect(server.count('/chat/upload'), 1);
+    await c.attachPhoto(SunonoImage(Uint8List.fromList([0xFF, 0xD8, 0xFF, 1, 2])));
+    expect(server.count('/chat/upload'), 1, reason: 'uploaded on pick');
+    await c.send('شو هاد؟');
+    expect(server.count('/chat/upload'), 1, reason: 'the send reuses the ref');
     expect(server.count('/chat/stream'), 1);
     expect(jsonDecode(server.bodies['/chat/stream']!.last)['image_ref'], 'img_ref_1');
     expect(c.messages.last.text, 'هاي الصورة');

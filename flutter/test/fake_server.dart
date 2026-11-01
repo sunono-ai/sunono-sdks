@@ -29,6 +29,12 @@ class FakeServer {
   bool dropChat = false;
   Future<void> Function()? beforeChatReply;
   Future<void> Function()? beforeUpload;
+
+  /// One-shot `/chat/upload` failure `(status, error code)`.
+  (int, String)? failUploadOnce;
+
+  /// One-shot `/chat/stream` failure status.
+  int? failStreamOnce;
   StreamController<List<int>>? live;
   int _tokens = 0;
 
@@ -94,8 +100,18 @@ class FakeServer {
         return http.StreamedResponse(live!.stream, 200);
       case '/chat/upload':
         await beforeUpload?.call();
+        if (failUploadOnce != null) {
+          final (status, code) = failUploadOnce!;
+          failUploadOnce = null;
+          return _json({'error': code}, status);
+        }
         return _json({'image_ref': 'img_ref_1', 'url': 'https://cdn.test/p.jpg'});
       case '/chat/stream':
+        if (failStreamOnce != null) {
+          final s = failStreamOnce!;
+          failStreamOnce = null;
+          return _json({'error': 'bad_request'}, s);
+        }
         const frames = 'data: {"type":"stage","stage":"understand"}\n\n'
             'data: {"type":"done","reply":"هاي الصورة","msg_ref":"msg_p","action_data":{}}\n\n';
         return http.StreamedResponse(Stream.value(utf8.encode(frames)), 200);

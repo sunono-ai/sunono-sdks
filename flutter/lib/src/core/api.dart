@@ -222,15 +222,29 @@ class SunonoApi {
   }
 
   /// Photo upload (PROTOCOL §9). Returns the `image_ref` for the next turn.
-  Future<String> upload(String token, List<int> bytes, {String filename = 'photo.jpg'}) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$_shop/chat/upload'))
+  /// [onProgress] gets 0..1 as the body is pulled by the socket (real
+  /// backpressure, so it tracks what left the device). Completing [abort]
+  /// closes the connection, which stops the transfer.
+  Future<String> upload(String token, List<int> bytes,
+      {String filename = 'photo.jpg', void Function(double)? onProgress, Future<void>? abort}) async {
+    final multipart = http.MultipartRequest('POST', Uri.parse('$_shop/chat/upload'))
       ..headers.addAll(_headers(token: token))
       ..files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
-    // Both phases are bounded: the send (a photo on a slow link legitimately
-    // outlasts [requestTimeout], so it gets [turnTimeout]) and the reply body.
-    final sent = await _client.send(req).timeout(turnTimeout);
-    final r = await http.Response.fromStream(sent).timeout(requestTimeout);
-    return '${_obj(await _decode(r))['image_ref']}';
+    final body = multipart.finalize(); // also sets the multipart content-type
+    final req = _ChunkedRequest(multipart.url, body, multipart.contentLength, onProgress)
+      ..headers.addAll(multipart.headers);
+    // A client of its own, so aborting never disturbs the shared connection.
+    final client = _newClient();
+    unawaited(abort?.then((_) => client.close()));
+    try {
+      // Both phases are bounded: the send (a photo on a slow link legitimately
+      // outlasts [requestTimeout], so it gets [turnTimeout]) and the reply body.
+      final sent = await client.send(req).timeout(turnTimeout);
+      final r = await http.Response.fromStream(sent).timeout(requestTimeout);
+      return '${_obj(await _decode(r))['image_ref']}';
+    } finally {
+      client.close();
+    }
   }
 
   /// Magento cart binding (PROTOCOL §8). True when the cart is now bound.
@@ -251,4 +265,34 @@ class SunonoApi {
   }
 
   void close() => _client.close();
+}
+
+/// A POST whose body is pulled lazily in 16 KB slices, reporting progress.
+class _ChunkedRequest extends http.BaseRequest {
+  _ChunkedRequest(Uri url, this._body, int total, this._onProgress) : super('POST', url) {
+    contentLength = total;
+  }
+
+  final Stream<List<int>> _body;
+  final void Function(double)? _onProgress;
+
+  @override
+  http.ByteStream finalize() {
+    super.finalize();
+    return http.ByteStream(_slices());
+  }
+
+  Stream<List<int>> _slices() async* {
+    const slice = 16 * 1024;
+    var sent = 0;
+    final total = contentLength ?? 0;
+    await for (final chunk in _body) {
+      for (var i = 0; i < chunk.length; i += slice) {
+        final end = i + slice < chunk.length ? i + slice : chunk.length;
+        yield chunk.sublist(i, end);
+        sent += end - i; // resumes when the socket asked for more
+        if (total > 0) _onProgress?.call(sent / total);
+      }
+    }
+  }
 }

@@ -35,9 +35,30 @@ class SunonoCopy {
         'offline' => _t('ما في اتصال بالإنترنت', 'No internet connection'),
         'image_too_large' => _t('الصورة كبيرة كثير', 'That photo is too large'),
         'invalid_image' => _t('ما قدرنا نفتح هالصورة', "We couldn't open that photo"),
+        'image_unavailable' =>
+          _t('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام', "Photos aren't available right now — tell me in words"),
         'image_blocked' => _t('ما بنقدر نستخدم هالصورة', "We can't use that photo"),
         _ => _t('ما وصلت الرسالة', "The message didn't go through"),
       };
+
+  /// Under the composer's preview: [error] for the codes a photo can fail
+  /// with, a photo-specific line for anything else.
+  String photoError(String code) => switch (code) {
+        'rate_limited' ||
+        'offline' ||
+        'image_too_large' ||
+        'invalid_image' ||
+        'image_blocked' ||
+        'image_unavailable' =>
+          error(code),
+        _ => _t('ما قدرنا نرفع الصورة', "We couldn't upload that photo"),
+      };
+
+  /// A different photo would be needed: retrying the same one fails the same way.
+  bool photoRetryable(String code) =>
+      !const {'image_too_large', 'invalid_image', 'image_blocked', 'customer_blocked'}.contains(code);
+
+  String uploadingPhoto(int percent) => _t('عم نرفع الصورة $percent%', 'Uploading photo $percent%');
 
   // Product card
   String get addToCart => _t('أضف للسلة', 'Add to cart');

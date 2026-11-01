@@ -70,18 +70,13 @@ void main() {
     gate.complete();
   });
 
-  test('a stalled photo upload times out: the bubble ends failed and the composer unlocks', () async {
-    make(
-        turnTimeout: const Duration(milliseconds: 50),
-        requestTimeout: const Duration(milliseconds: 50),
-        recoveryChecks: const [Duration(milliseconds: 50)]);
+  test('a stalled photo upload times out: the photo fails (offline) and the composer is not stuck', () async {
+    make(turnTimeout: const Duration(milliseconds: 50), requestTimeout: const Duration(milliseconds: 50));
     await c.open();
     final gate = Completer<void>();
     server.beforeUpload = () => gate.future;
-    final sending = c.send('what is this?', image: SunonoImage(Uint8List.fromList([1, 2, 3])));
-    await server.until(() => c.messages.any((m) => m.state == MessageState.recovering));
-    await sending.timeout(const Duration(seconds: 5));
-    expect(c.messages.last.state, MessageState.failed);
+    await c.attachPhoto(SunonoImage(Uint8List.fromList([0xFF, 0xD8, 0xFF, 1]))).timeout(const Duration(seconds: 5));
+    expect((c.photo.value as PhotoFailed).code, 'offline');
     expect(c.busy, isFalse);
     gate.complete();
   });

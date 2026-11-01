@@ -94,6 +94,8 @@ Checkout then hands off to your app (`CheckoutIntent`) instead of the chat. Set 
 
 Pass `pickImage` to `Sunono.init` to show the photo button. Return a JPEG resized to at most 1600 px (e.g. `image_picker` with `maxWidth: 1600, imageQuality: 85`). Add the camera and photo-library permission strings to your app.
 
+The photo uploads as soon as it is picked, with a progress ring on the preview; JPEG, PNG and WebP up to 10 MB are accepted. Errors (too large, unreadable, refused, photos unavailable, offline) show under the preview with a Retry where it can help, and a caption is required to send. Headless: `controller.attachPhoto(image)`, `controller.photo` (`PhotoIdle | PhotoUploading | PhotoReady | PhotoFailed`), `retryPhoto()`, `removePhoto()`; `send(text)` carries a ready photo.
+
 ## Notes
 
 - Prices are shown exactly as the store sends them (Latin digits, up to 2 decimals).
