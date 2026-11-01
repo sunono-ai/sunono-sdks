@@ -369,7 +369,7 @@ Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on cha
 
 Without a `client_message_id`, resending can double an action ("add 2"). Native clients send one on every turn (§4.0b); with it, a resend of the same message is safe: `409 turn_in_progress` while the turn runs, then an identical `200` replay. The recovery flow below is the fallback for servers or messages without it.
 
-- **`/chat/stream` (§4.0b) cancels the turn if the client disconnects mid-turn.** Nothing is saved, though cart side effects may already have happened. Native clients use it only for photo turns.
+- **`/chat/stream` (§4.0b) also finishes the turn if the client disconnects mid-turn**: the turn runs server-side and is saved. Recover through history, or resend with the same `client_message_id` for a replay. Older servers cancelled the turn on disconnect (nothing saved, though cart side effects may have happened), so a client must not assume a dropped stream left no trace. Native clients use it only for photo turns.
 - **Automatic resend is allowed only on `401`/`422`** (re-auth), which are rejected before any work.
 - **Any other failure without a response → "recovering":**
   - Re-fetch history at about 4 s, 12 s and 30 s. Both rows of a finished turn appear together.
