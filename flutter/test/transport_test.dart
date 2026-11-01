@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
@@ -19,21 +21,24 @@ void main() {
   var made = false;
   var now = DateTime(2026, 1, 1);
 
-  SunonoApi api({Duration? turnTimeout, String apiBase = 'https://api.test/api'}) => SunonoApi(
+  SunonoApi api({Duration? turnTimeout, Duration? requestTimeout, String apiBase = 'https://api.test/api'}) =>
+      SunonoApi(
         shopKey: 'pk_test',
         apiBase: apiBase,
         turnTimeout: turnTimeout ?? const Duration(seconds: 90),
+        requestTimeout: requestTimeout ?? const Duration(seconds: 15),
         clientFactory: () => MockClient.streaming(server.handle),
       );
 
   SunonoChatController make({
     Duration? turnTimeout,
+    Duration? requestTimeout,
     List<Duration> recoveryChecks = const [Duration(milliseconds: 20), Duration(milliseconds: 20)],
     SunonoCartBridge? bridge,
   }) {
     made = true;
     return c = SunonoChatController(
-      api: api(turnTimeout: turnTimeout),
+      api: api(turnTimeout: turnTimeout, requestTimeout: requestTimeout),
       storage: MemoryStorage(),
       cartBridge: bridge,
       recoveryChecks: recoveryChecks,
@@ -63,6 +68,83 @@ void main() {
     expect(c.messages.last.state, MessageState.failed);
     expect(c.messages.last.errorCode, 'not_delivered');
     gate.complete();
+  });
+
+  test('a stalled photo upload times out: the bubble ends failed and the composer unlocks', () async {
+    make(
+        turnTimeout: const Duration(milliseconds: 50),
+        requestTimeout: const Duration(milliseconds: 50),
+        recoveryChecks: const [Duration(milliseconds: 50)]);
+    await c.open();
+    final gate = Completer<void>();
+    server.beforeUpload = () => gate.future;
+    final sending = c.send('what is this?', image: SunonoImage(Uint8List.fromList([1, 2, 3])));
+    await server.until(() => c.messages.any((m) => m.state == MessageState.recovering));
+    await sending.timeout(const Duration(seconds: 5));
+    expect(c.messages.last.state, MessageState.failed);
+    expect(c.busy, isFalse);
+    gate.complete();
+  });
+
+  test('parseSse: lone CR breaks lines, CRLF (even split across chunks) breaks once', () async {
+    final chunks = ['data: a\r', '\ndata: b\r\r', 'data: c\n\n', 'event: e\r\ndata: d\r\n\r\n']
+        .map((t) => utf8.encode(t))
+        .toList();
+    final frames = await parseSse(Stream.fromIterable(chunks)).toList();
+    expect(frames.map((f) => (f.event, f.data)).toList(), [(null, 'a\nb'), (null, 'c'), ('e', 'd')]);
+  });
+
+  test('parseSse: a 200 KB frame in one-byte chunks stays linear and intact', () async {
+    final bytes = utf8.encode('data: ${'q' * 200000}\n\n');
+    final frames = await parseSse(Stream.fromIterable(bytes.map((b) => [b]))).toList();
+    expect(frames.single.data.length, 200000);
+  });
+
+  group('history beyond the 300 cap', () {
+    List<Map<String, dynamic>> rows() => [
+          {'role': 'user', 'sender': 'user', 'text': 'hi', 'msg_ref': 'u0'},
+          {'role': 'bot', 'sender': 'bot', 'text': 'hello', 'msg_ref': 'b0'},
+          for (var i = 2; i < 400; i++) {'role': 'bot', 'sender': 'bot', 'text': 'm$i', 'msg_ref': 'r$i'},
+        ];
+
+    test('refreshing again keeps order and length (trimmed rows are not re-appended)', () async {
+      server.historyRows = rows();
+      make();
+      await c.open();
+      await server.until(() => server.live != null);
+      await c.refreshHistory();
+      await c.refreshHistory();
+      expect(c.messages, hasLength(300));
+      expect(c.messages.first.text, 'm100');
+      expect(c.messages.last.text, 'm399');
+    });
+
+    test('recovery does not adopt a trimmed old row with the same text', () async {
+      server.historyRows = rows();
+      make();
+      await c.open();
+      await server.until(() => server.live != null);
+      server.dropChat = true;
+      await c.send('hi'); // the old, trimmed 'hi' (u0) must not count as this send
+      expect(c.messages.last.state, MessageState.failed);
+      expect(c.messages.last.errorCode, 'not_delivered');
+    });
+  });
+
+  test('resume on a disabled chat re-opens it once the shop switches chat back on', () async {
+    server.config = {'enabled': false, 'reason': 'platform_disabled'};
+    make();
+    await c.open();
+    expect(c.status, ChatStatus.disabled);
+    server.config = {'enabled': true};
+    now = now.add(const Duration(seconds: 30));
+    c.resume();
+    await pumpEvents();
+    expect(c.status, ChatStatus.disabled, reason: 'config is still fresh');
+    now = now.add(const Duration(seconds: 31));
+    c.resume();
+    await server.until(() => c.status == ChatStatus.ready);
+    expect(c.disabledReason, isNull);
   });
 
   test('apiBase must be https, except local development hosts', () {

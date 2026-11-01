@@ -215,8 +215,10 @@ class SunonoApi {
     final req = http.MultipartRequest('POST', Uri.parse('$_shop/chat/upload'))
       ..headers.addAll(_headers(token: token))
       ..files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
-    // A photo upload on a slow link legitimately outlasts [requestTimeout].
-    final r = await http.Response.fromStream(await _client.send(req)).timeout(turnTimeout);
+    // Both phases are bounded: the send (a photo on a slow link legitimately
+    // outlasts [requestTimeout], so it gets [turnTimeout]) and the reply body.
+    final sent = await _client.send(req).timeout(turnTimeout);
+    final r = await http.Response.fromStream(sent).timeout(requestTimeout);
     return '${_obj(await _decode(r))['image_ref']}';
   }
 

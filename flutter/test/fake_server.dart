@@ -18,6 +18,7 @@ class FakeServer {
   Map<String, dynamic> failChatBody = {'message': 'nope'};
   bool dropChat = false;
   Future<void> Function()? beforeChatReply;
+  Future<void> Function()? beforeUpload;
   StreamController<List<int>>? live;
   int _tokens = 0;
 
@@ -75,6 +76,7 @@ class FakeServer {
         live = StreamController<List<int>>();
         return http.StreamedResponse(live!.stream, 200);
       case '/chat/upload':
+        await beforeUpload?.call();
         return _json({'image_ref': 'img_ref_1', 'url': 'https://cdn.test/p.jpg'});
       case '/chat/stream':
         const frames = 'data: {"type":"stage","stage":"understand"}\n\n'

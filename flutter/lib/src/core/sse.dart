@@ -30,29 +30,38 @@ class SseTooLarge implements Exception {
 const _maxLine = 256 * 1024;
 const _maxFrameData = 1024 * 1024;
 
-/// Splits a UTF-8 byte stream into SSE frames (blank-line separated, `\n` or
-/// `\r\n`). Comment lines and frames with no `data:` are dropped. A line over
-/// 256 KB or a frame's data over 1 MB aborts with [SseTooLarge], checked as
-/// bytes arrive so a hostile peer can't make us buffer more.
+/// Splits a UTF-8 byte stream into SSE frames (blank-line separated; a line
+/// ends at `\n`, `\r` or `\r\n`, the last counting once even across chunks).
+/// Comment lines and frames with no `data:` are dropped. A line over 256 KB or
+/// a frame's data over 1 MB aborts with [SseTooLarge], checked as bytes arrive
+/// so a hostile peer can't make us buffer more. Linear in the input size.
 Stream<SseFrame> parseSse(Stream<List<int>> bytes) async* {
   String? event;
   final data = <String>[];
   var dataLen = 0;
-  var pending = '';
-  // The trailing '\n' terminates a last unterminated line, as the old splitter did.
+  final tail = StringBuffer(); // the current unterminated line
+  var skipLf = false; // the previous char was '\r': swallow a directly following '\n'
+  // The trailing '\n' terminates a last unterminated line.
   Stream<String> chunks() async* {
     yield* bytes.transform(utf8.decoder);
     yield '\n';
   }
 
   await for (final chunk in chunks()) {
-    pending += chunk;
-    var nl = pending.indexOf('\n');
-    while (nl != -1) {
-      var line = pending.substring(0, nl);
-      pending = pending.substring(nl + 1);
-      nl = pending.indexOf('\n');
-      if (line.endsWith('\r')) line = line.substring(0, line.length - 1);
+    var start = 0;
+    for (var k = 0; k < chunk.length; k++) {
+      final ch = chunk.codeUnitAt(k);
+      if (ch == 10 && skipLf) {
+        skipLf = false;
+        start = k + 1;
+        continue;
+      }
+      skipLf = false;
+      if (ch != 10 && ch != 13) continue;
+      skipLf = ch == 13;
+      final line = tail.isEmpty ? chunk.substring(start, k) : (tail..write(chunk.substring(start, k))).toString();
+      tail.clear();
+      start = k + 1;
       if (line.length > _maxLine) throw const SseTooLarge('line');
       if (line.isEmpty) {
         if (data.isNotEmpty) yield SseFrame(event, data.join('\n'));
@@ -62,9 +71,9 @@ Stream<SseFrame> parseSse(Stream<List<int>> bytes) async* {
         continue;
       }
       if (line.startsWith(':')) continue;
-      final i = line.indexOf(':');
-      final field = i == -1 ? line : line.substring(0, i);
-      var value = i == -1 ? '' : line.substring(i + 1);
+      final c = line.indexOf(':');
+      final field = c == -1 ? line : line.substring(0, c);
+      var value = c == -1 ? '' : line.substring(c + 1);
       if (value.startsWith(' ')) value = value.substring(1);
       if (field == 'event') {
         event = value;
@@ -74,7 +83,8 @@ Stream<SseFrame> parseSse(Stream<List<int>> bytes) async* {
         data.add(value);
       }
     }
-    if (pending.length > _maxLine) throw const SseTooLarge('line');
+    tail.write(chunk.substring(start));
+    if (tail.length > _maxLine) throw const SseTooLarge('line');
   }
   if (data.isNotEmpty) yield SseFrame(event, data.join('\n'));
 }

@@ -126,6 +126,9 @@ class SunonoChatController extends ChangeNotifier {
 
   final _events = StreamController<SunonoEvent>.broadcast();
   final List<ChatMessage> _messages = [];
+
+  /// msg_refs trimmed off the top of [_messages] (grows only as the thread does).
+  final Set<String> _trimmed = {};
   String _lang;
   ChatStatus _status = ChatStatus.idle;
   ShopConfig _config = const ShopConfig();
@@ -172,7 +175,15 @@ class SunonoChatController extends ChangeNotifier {
   }
 
   void _changed() {
-    if (_messages.length > _maxMessages) _messages.removeRange(0, _messages.length - _maxMessages);
+    final over = _messages.length - _maxMessages;
+    if (over > 0) {
+      // Remember what fell off: a history row for any of them is old news, not
+      // a new row to append or a turn to adopt.
+      for (final m in _messages.take(over)) {
+        if (m.msgRef != null) _trimmed.add(m.msgRef!);
+      }
+      _messages.removeRange(0, over);
+    }
     if (!_disposed) notifyListeners();
   }
 
@@ -255,7 +266,7 @@ class SunonoChatController extends ChangeNotifier {
       }
       _changed();
     } catch (e, s) {
-      _configAt = previous;
+      if (epoch == _epoch) _configAt = previous;
       _emit(ErrorEvent(e, s));
     }
   }
@@ -263,9 +274,15 @@ class SunonoChatController extends ChangeNotifier {
   /// App came back: config if stale, history first, then live again; re-check
   /// the cart link.
   void resume() {
-    if (_status != ChatStatus.ready) return;
     final at = _configAt;
-    if (at == null || _clock().difference(at) > _configMaxAge) unawaited(_refreshConfig());
+    final stale = at == null || _clock().difference(at) > _configMaxAge;
+    if (_status == ChatStatus.disabled) {
+      // A shop that switched chat back on returns without re-attaching the view.
+      if (stale) unawaited(open());
+      return;
+    }
+    if (_status != ChatStatus.ready) return;
+    if (stale) unawaited(_refreshConfig());
     unawaited(_bind(ensure: false));
     _live.start();
   }
@@ -277,6 +294,7 @@ class SunonoChatController extends ChangeNotifier {
     _live.stop();
     await _session.reset();
     _messages.clear();
+    _trimmed.clear();
     _cart = null;
     _paused = false;
     _bound = false;
@@ -530,6 +548,7 @@ class SunonoChatController extends ChangeNotifier {
     return [
       for (var i = 0; i < h.rows.length; i++)
         if (h.rows[i].role == 'user' &&
+            !_trimmed.contains(h.rows[i].msgRef) &&
             !known.contains(h.rows[i].msgRef) &&
             !(i + 1 < h.rows.length && h.rows[i + 1].role != 'user' && known.contains(h.rows[i + 1].msgRef)))
           h.rows[i],
@@ -553,7 +572,7 @@ class SunonoChatController extends ChangeNotifier {
           if (m.msgRef != null) m.msgRef!
       };
       for (final r in h.rows) {
-        if (r.msgRef != null && onScreen.contains(r.msgRef)) continue;
+        if (r.msgRef != null && (onScreen.contains(r.msgRef) || _trimmed.contains(r.msgRef))) continue;
         if (r.role == 'user') {
           if (!unknownUsers.contains(r)) continue;
           final local =
