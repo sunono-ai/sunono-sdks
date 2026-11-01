@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/controller.dart';
 import '../core/format.dart';
 import '../core/host.dart';
+import '../core/models.dart';
 import 'cards.dart';
 import 'copy.dart';
 import 'orb.dart';
@@ -19,6 +20,7 @@ class SunonoChatView extends StatefulWidget {
     this.pickImage,
     this.initialMessage,
     this.productId,
+    this.productSku,
     this.showHeader = true,
     this.onClose,
   });
@@ -36,6 +38,9 @@ class SunonoChatView extends StatefulWidget {
 
   /// Scopes [initialMessage] to a product (a card's `public_id`).
   final String? productId;
+
+  /// Scopes [initialMessage] to a product by SKU; [productId] wins if both are set.
+  final String? productSku;
   final bool showHeader;
 
   /// Shows a close button in the header (used by the bottom sheet).
@@ -90,7 +95,7 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
   void _onChange() {
     if (!_sentInitial && widget.initialMessage != null && _c.status == ChatStatus.ready && !_c.busy) {
       _sentInitial = true;
-      _c.send(widget.initialMessage!, productId: widget.productId);
+      _c.send(widget.initialMessage!, productId: widget.productId, productSku: widget.productSku);
     }
     if (mounted) setState(() {});
   }
@@ -311,6 +316,11 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
     );
   }
 
+  /// A card tap: the visible synthetic phrase plus the structured action.
+  Future<void> _cardTap(ProductCard p, String action, String Function(String, String) phrase, String lang) => widget
+      .controller
+      .send(phrase(p.title(lang), lang), synthetic: true, productSku: p.sku, tap: (action: action, ref: p.publicId));
+
   Widget _content() {
     final m = widget.message;
     final theme = widget.theme;
@@ -425,10 +435,15 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
           child: ProductCarousel(
             products: m.products,
             theme: theme,
+            uiLang: widget.lang,
             lang: contentLang,
             busy: c.busy,
-            onOpen: c.openProduct,
-            onSend: (text) => c.send(text, synthetic: true),
+            addingRef: c.addingRef,
+            onOpen: (p) {
+              if (!c.openProduct(p)) _cardTap(p, 'product_detail', detailsPhrase, contentLang);
+            },
+            onAdd: (p) => _cardTap(p, 'add_to_cart', addToCartPhrase, contentLang),
+            onDetails: (p) => _cardTap(p, 'product_detail', detailsPhrase, contentLang),
           ),
         ));
       }

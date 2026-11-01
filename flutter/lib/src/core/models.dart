@@ -49,6 +49,10 @@ class ProductCard {
     this.discountJod,
     this.priceFrom,
     this.preselectPriceJod,
+    this.preselectWasJod,
+    this.preselectLabelAr,
+    this.preselectLabelEn,
+    this.onSale = false,
     this.optionsSummary,
     this.options = const [],
     this.inStock = true,
@@ -62,6 +66,7 @@ class ProductCard {
     final hasImage = j['has_image'] != false;
     final pre = _map(j['preselect_line']);
     final prePrice = _int(pre['price_fils']);
+    final preWas = _int(pre['was_fils']);
     return ProductCard(
       publicId: _str(j['public_id']) ?? '',
       sku: _str(j['sku']),
@@ -71,6 +76,10 @@ class ProductCard {
       discountJod: _num(j['discount_jod']),
       priceFrom: _num(j['price_from']),
       preselectPriceJod: prePrice == null ? null : prePrice / 1000,
+      preselectWasJod: preWas == null ? null : preWas / 1000,
+      preselectLabelAr: _str(pre['label_ar']),
+      preselectLabelEn: _str(pre['label_en']),
+      onSale: j['on_sale'] == true,
       optionsSummary: _str(j['options_summary']),
       options: [
         for (final o in _maps(j['options']))
@@ -115,6 +124,14 @@ class ProductCard {
 
   /// A specific variant was named: quote its price, not [priceFrom].
   final double? preselectPriceJod;
+
+  /// The variant's price before its discount (`preselect_line.was_fils`).
+  final double? preselectWasJod;
+  final String? preselectLabelAr;
+  final String? preselectLabelEn;
+
+  /// The server flags the product as on sale (with [priceFrom]: the «عرض» badge).
+  final bool onSale;
   final String? optionsSummary;
   final List<ProductOption> options;
   final bool inStock;
@@ -124,6 +141,24 @@ class ProductCard {
   final List<String> chips;
 
   String title(String lang) => pickLang(titleAr, titleEn, lang) ?? '';
+
+  /// Which variant a preselected price is for («L / كحلي»), if the server said.
+  String? preselectLabel(String lang) => pickLang(preselectLabelAr, preselectLabelEn, lang);
+
+  /// The price shown in bold.
+  double? get shownPrice => preselectPriceJod ?? discountJod ?? priceFrom ?? priceJod;
+
+  /// The price shown struck through: the variant's `was`, or the list price
+  /// when a discount applies.
+  double? get struckPrice => preselectPriceJod != null ? preselectWasJod : (discountJod != null ? priceJod : null);
+
+  /// `round((1 - disc/orig) * 100)`, only when strictly between 0 and 100.
+  int? get salePct {
+    final was = struckPrice, now = shownPrice;
+    if (was == null || now == null || was <= 0) return null;
+    final x = ((1 - now / was) * 100).round();
+    return x > 0 && x < 100 ? x : null;
+  }
 
   /// The one-line options text: the server's Arabic summary, or (English)
   /// built from [options] — in-stock values, then sold-out ones in brackets.

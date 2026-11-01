@@ -6,49 +6,73 @@ import 'copy.dart';
 import 'theme.dart';
 
 /// Horizontally scrolling product cards for one turn.
+///
+/// Titles, money and options follow [lang] (the turn's reply language, which
+/// also sets the carousel's direction); buttons and badges follow [uiLang].
 class ProductCarousel extends StatelessWidget {
   const ProductCarousel({
     super.key,
     required this.products,
     required this.theme,
     required this.lang,
+    required this.uiLang,
     required this.onOpen,
-    required this.onSend,
+    required this.onAdd,
+    required this.onDetails,
     required this.busy,
+    this.addingRef,
   });
 
   final List<ProductCard> products;
   final SunonoTheme theme;
-
-  /// Content language (titles, money): the turn's reply language.
   final String lang;
+  final String uiLang;
   final void Function(ProductCard) onOpen;
-  final void Function(String text) onSend;
+  final void Function(ProductCard) onAdd;
+  final void Function(ProductCard) onDetails;
+
+  /// A turn is running: Add and Details are no-ops (the buttons keep their look).
   final bool busy;
 
+  /// The card whose Add started that turn: only its button spins.
+  final String? addingRef;
+
   @override
-  Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(
-        maxScaleFactor: 1.6,
-        child: Builder(builder: (context) {
-          // Image + padding are fixed; the text block grows with the font.
-          final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-          return SizedBox(
-            height: 204 + 72 * scale,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsetsDirectional.only(start: 4, end: 16, top: 4, bottom: 8),
-              itemCount: products.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => ProductTile(
-                product: products[i],
-                theme: theme,
-                lang: lang,
-                onOpen: () => onOpen(products[i]),
-                onAdd: busy ? null : () => onSend(addToCartPhrase(products[i].title(lang), lang)),
+  Widget build(BuildContext context) => Directionality(
+        textDirection: lang == 'en' ? TextDirection.ltr : TextDirection.rtl,
+        child: MediaQuery.withClampedTextScaling(
+          maxScaleFactor: 1.6,
+          child: Builder(builder: (context) {
+            // Image + padding are fixed; the text block grows with the font.
+            final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+            return SizedBox(
+              height: 232 + 140 * scale,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsetsDirectional.only(start: 4, end: 16, top: 4, bottom: 8),
+                itemCount: products.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (_, i) {
+                  final p = products[i];
+                  return ProductTile(
+                    product: p,
+                    theme: theme,
+                    lang: lang,
+                    uiLang: uiLang,
+                    onOpen: () => onOpen(p),
+                    onAdd: () {
+                      if (!busy) onAdd(p);
+                    },
+                    onDetails: () {
+                      if (!busy) onDetails(p);
+                    },
+                    adding: addingRef == p.publicId,
+                  );
+                },
               ),
-            ),
-          );
-        }),
+            );
+          }),
+        ),
       );
 }
 
@@ -64,29 +88,60 @@ Widget boundedNetworkImage(BuildContext context, String url, {required double wi
           fallback?.call() ?? const SizedBox(height: 80, child: Center(child: Icon(Icons.broken_image_outlined))),
     );
 
+/// Prices, percentages and SKUs read left to right inside Arabic text.
+Widget _ltr(Widget child) => Directionality(textDirection: TextDirection.ltr, child: child);
+
 class ProductTile extends StatelessWidget {
-  const ProductTile(
-      {super.key, required this.product, required this.theme, required this.lang, required this.onOpen, this.onAdd});
+  const ProductTile({
+    super.key,
+    required this.product,
+    required this.theme,
+    required this.lang,
+    String? uiLang,
+    required this.onOpen,
+    this.onAdd,
+    this.onDetails,
+    this.adding = false,
+  }) : uiLang = uiLang ?? lang;
 
   final ProductCard product;
   final SunonoTheme theme;
+
+  /// Content language: title, money, options, chips.
   final String lang;
+
+  /// Chrome language: buttons and badges.
+  final String uiLang;
   final VoidCallback onOpen;
   final VoidCallback? onAdd;
+  final VoidCallback? onDetails;
+
+  /// This card's Add started the running turn.
+  final bool adding;
+
+  TextDirection _dir(String text) => isRtlText(text, fallbackRtl: lang != 'en') ? TextDirection.rtl : TextDirection.ltr;
 
   @override
   Widget build(BuildContext context) {
-    final t = SunonoCopy.of(lang);
+    final t = SunonoCopy.of(uiLang);
     final p = product;
+    final title = p.title(lang);
     final image = p.imageUrls.isEmpty ? null : p.imageUrls.first;
-    final price = p.preselectPriceJod ?? p.discountJod ?? p.priceFrom ?? p.priceJod;
-    final struck = p.preselectPriceJod == null && p.discountJod != null ? p.priceJod : null;
+    final price = p.shownPrice;
+    final struck = p.struckPrice;
+    final pct = p.salePct;
     final from = p.preselectPriceJod == null && p.priceFrom != null;
     final options = from ? p.optionsLine(lang) : '';
+    final label = p.preselectPriceJod == null ? null : p.preselectLabel(lang);
+    final stockBadge = !p.inStock
+        ? (t.unavailable, theme.muted)
+        : p.lowStockQty != null
+            ? (t.lowStock(p.lowStockQty!), theme.danger)
+            : null;
 
     return Semantics(
       button: true,
-      label: p.title(lang),
+      label: title,
       child: Container(
         width: 164,
         decoration: BoxDecoration(
@@ -108,47 +163,54 @@ class ProductTile extends StatelessWidget {
                     boundedNetworkImage(context, image, width: 164, fallback: _noImage)
                   else
                     _noImage(),
-                  if (!p.inStock)
-                    _badge(t.unavailable, theme.muted)
-                  else if (p.lowStockQty != null)
-                    _badge(t.lowStock(p.lowStockQty!), theme.danger)
-                  else if (struck != null)
-                    _badge(t.sale, theme.accent),
+                  if (stockBadge != null || (from && p.onSale))
+                    PositionedDirectional(
+                      top: 8,
+                      start: 8,
+                      end: 8,
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        if (stockBadge != null) Flexible(child: _badge(stockBadge.$1, stockBadge.$2)),
+                        const Spacer(),
+                        if (from && p.onSale) Flexible(child: _badge(t.sale, theme.accent)),
+                      ]),
+                    ),
+                  if (onDetails != null) _detailsButton(t.detailsOf(title)),
                 ]),
               ),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(p.title(lang),
+                    Text(title,
+                        textDirection: _dir(title),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.text(size: 13, weight: FontWeight.w600, height: 1.25)),
-                    if (options.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(options,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.text(size: 11, color: theme.muted)),
-                      ),
+                    if (label != null) _note(label),
+                    if (options.isNotEmpty) _note(options),
+                    if (p.chips.isNotEmpty) _chips(p.chips),
                     const Spacer(),
                     Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                      Text('${from ? '${t.from} ' : ''}${formatJod(price, lang)}',
+                      _ltr(Text('${from ? '${SunonoCopy.of(lang).from} ' : ''}${formatJod(price, lang)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.text(size: 14, weight: FontWeight.w700, color: theme.primary)),
+                          style: theme.text(size: 14, weight: FontWeight.w700, color: theme.primary))),
                       if (struck != null)
-                        Text(formatJod(struck, lang),
+                        _ltr(Text(formatJod(struck, lang),
                             maxLines: 1,
                             style: theme
                                 .text(size: 11, color: theme.muted)
-                                .copyWith(decoration: TextDecoration.lineThrough)),
+                                .copyWith(decoration: TextDecoration.lineThrough))),
+                      if (pct != null)
+                        _ltr(Text('-$pct%',
+                            maxLines: 1, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.danger))),
                     ]),
-                    if (p.inStock) ...[
-                      const SizedBox(height: 6),
-                      _AddButton(theme: theme, label: t.addToCart, onTap: onAdd),
-                    ],
+                    const SizedBox(height: 6),
+                    _AddButton(
+                        theme: theme,
+                        label: p.inStock ? t.addToCart : t.unavailable,
+                        onTap: p.inStock ? onAdd : null,
+                        spinning: adding),
                   ]),
                 ),
               ),
@@ -159,27 +221,92 @@ class ProductTile extends StatelessWidget {
     );
   }
 
+  Widget _note(String text) => Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(text,
+            textDirection: _dir(text),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.text(size: 11, color: theme.muted)),
+      );
+
+  /// Up to three metadata values; at most two rows, whatever the text scale.
+  Widget _chips(List<String> chips) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Builder(builder: (context) {
+          final row = MediaQuery.textScalerOf(context).scale(10) * 1.3 + 6;
+          return ClipRect(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: row * 2 + 4),
+              child: Wrap(spacing: 4, runSpacing: 4, children: [
+                for (final c in chips.take(3))
+                  Container(
+                    constraints: const BoxConstraints(maxWidth: 140),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: theme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
+                    child: Text(c,
+                        textDirection: _dir(c),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.text(size: 10, color: theme.muted)),
+                  ),
+              ]),
+            ),
+          );
+        }),
+      );
+
   Widget _noImage() => DecoratedBox(
         decoration: BoxDecoration(gradient: theme.brandGradient.scale(0.15)),
         child: Icon(Icons.shopping_bag_outlined, color: theme.primary.withValues(alpha: 0.5)),
       );
 
-  Widget _badge(String label, Color color) => PositionedDirectional(
-        top: 8,
-        start: 8,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-          child: Text(label, style: theme.text(size: 11, weight: FontWeight.w600, color: Colors.white)),
+  /// Stock status sits top-start; the sale badge sits top-end.
+  Widget _badge(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+        child: Text(label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.text(size: 11, weight: FontWeight.w600, color: Colors.white)),
+      );
+
+  /// ⓘ on the image's bottom-end corner (the badges own the top).
+  Widget _detailsButton(String label) => PositionedDirectional(
+        bottom: 0,
+        end: 0,
+        child: Semantics(
+          container: true,
+          button: true,
+          label: label,
+          excludeSemantics: true,
+          child: InkWell(
+            onTap: onDetails,
+            customBorder: const CircleBorder(),
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Center(
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.9), shape: BoxShape.circle),
+                  child: Icon(Icons.info_outline_rounded, size: 18, color: theme.primary),
+                ),
+              ),
+            ),
+          ),
         ),
       );
 }
 
 class _AddButton extends StatelessWidget {
-  const _AddButton({required this.theme, required this.label, this.onTap});
+  const _AddButton({required this.theme, required this.label, this.onTap, this.spinning = false});
   final SunonoTheme theme;
   final String label;
   final VoidCallback? onTap;
+  final bool spinning;
 
   @override
   Widget build(BuildContext context) => Opacity(
@@ -194,7 +321,14 @@ class _AddButton extends StatelessWidget {
               onTap: onTap,
               child: Center(
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.add_shopping_cart_rounded, size: 15, color: Colors.white),
+                  if (spinning)
+                    // Reduce motion: a still glyph instead of a spinner.
+                    MediaQuery.disableAnimationsOf(context)
+                        ? const Icon(Icons.hourglass_top_rounded, size: 15, color: Colors.white)
+                        : const SizedBox.square(
+                            dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  else
+                    const Icon(Icons.add_shopping_cart_rounded, size: 15, color: Colors.white),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(label,

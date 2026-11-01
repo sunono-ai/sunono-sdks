@@ -71,7 +71,8 @@ abstract final class Sunono {
 
   /// The chat as a full-height bottom sheet, e.g. from a product page:
   /// `Sunono.open(context, initialMessage: 'متوفر بمقاس 42؟')`.
-  static Future<void> open(BuildContext context, {String? initialMessage, String? productId, SunonoTheme? theme}) {
+  static Future<void> open(BuildContext context,
+      {String? initialMessage, String? productId, String? productSku, SunonoTheme? theme}) {
     final c = controller;
     return showModalBottomSheet<void>(
       context: context,
@@ -91,6 +92,7 @@ abstract final class Sunono {
                 pickImage: _pickImage,
                 initialMessage: initialMessage,
                 productId: productId,
+                productSku: productSku,
                 onClose: () => Navigator.of(ctx).pop(),
               ),
             ),

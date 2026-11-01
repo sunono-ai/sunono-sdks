@@ -130,25 +130,34 @@ class SunonoApi {
     return ShopConfig.fromJson(_obj(await _decode(r)));
   }
 
-  Map<String, Object?> _turnBody(
-          String text, String lang, bool synthetic, String? productId, String? imageRef, String? clientMessageId) =>
+  /// [productId] (a card's public id) wins over [productSku]; [tap] is the
+  /// structured card tap `(action, action_ref)` (PROTOCOL §4).
+  Map<String, Object?> _turnBody(String text, String lang, bool synthetic, String? productId, String? productSku,
+          ({String action, String ref})? tap, String? imageRef, String? clientMessageId) =>
       {
         'message': text,
         'lang': lang,
         'synthetic': synthetic,
+        if (tap != null) 'action': tap.action,
+        if (tap != null) 'action_ref': tap.ref,
+        if (productId != null) 'product_id': productId else if (productSku != null) 'product_sku': productSku,
         if (clientMessageId != null) 'client_message_id': clientMessageId,
-        if (productId != null) 'product_id': productId,
         if (imageRef != null) 'image_ref': imageRef,
       };
 
   /// Text turn (PROTOCOL §4.0): completes server-side even if we disconnect.
   /// [clientMessageId] makes a resend of the same message safe (§4).
   Future<TurnResult> chat(String token, String text,
-      {required String lang, bool synthetic = false, String? productId, String? clientMessageId}) async {
+      {required String lang,
+      bool synthetic = false,
+      String? productId,
+      String? productSku,
+      ({String action, String ref})? tap,
+      String? clientMessageId}) async {
     final r = await _client
         .post(Uri.parse('$_shop/chat'),
             headers: _headers(token: token, json: true),
-            body: jsonEncode(_turnBody(text, lang, synthetic, productId, null, clientMessageId)))
+            body: jsonEncode(_turnBody(text, lang, synthetic, productId, productSku, tap, null, clientMessageId)))
         .timeout(turnTimeout);
     return TurnResult.fromJson(_obj(await _decode(r)));
   }
@@ -159,11 +168,13 @@ class SunonoApi {
       {required String lang,
       bool synthetic = false,
       String? productId,
+      String? productSku,
+      ({String action, String ref})? tap,
       String? imageRef,
       String? clientMessageId}) async* {
     final req = http.Request('POST', Uri.parse('$_shop/chat/stream'))
       ..headers.addAll(_headers(token: token, json: true))
-      ..body = jsonEncode(_turnBody(text, lang, synthetic, productId, imageRef, clientMessageId));
+      ..body = jsonEncode(_turnBody(text, lang, synthetic, productId, productSku, tap, imageRef, clientMessageId));
     final res = await _client.send(req).timeout(turnTimeout);
     if (res.statusCode >= 400) {
       await _decode(await http.Response.fromStream(res).timeout(requestTimeout));

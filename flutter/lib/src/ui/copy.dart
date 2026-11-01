@@ -37,6 +37,7 @@ class SunonoCopy {
   // Product card
   String get addToCart => _t('أضف للسلة', 'Add to cart');
   String get details => _t('التفاصيل', 'Details');
+  String detailsOf(String title) => '$details: $title';
   String get unavailable => _t('مش متوفر', 'Unavailable');
   String get from => _t('من', 'From');
   String get sale => _t('عرض', 'Sale');
