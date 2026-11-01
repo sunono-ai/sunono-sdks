@@ -67,7 +67,7 @@ The assistant hands navigation back to your app through `onIntent`. Return `true
 
 | Intent | When | If you return `false` / don't handle it |
 |---|---|---|
-| `OpenProductIntent(sku, url, title)` | The shopper taps a product card | The assistant answers with the product's details in the chat |
+| `OpenProductIntent(productId, sku, url, title)` | The shopper taps a product card | The assistant answers with the product's details in the chat |
 | `OpenCartIntent` | The shopper taps the cart bar | The assistant shows the cart in the chat |
 | `CheckoutIntent(url)` | The shopper taps the checkout hand-off button | Nothing opens; an `ErrorEvent(UnhandledIntent)` is emitted and the sheet stays |
 | `OpenUrlIntent(url)` | The shopper taps a link in a reply (https links only) | Nothing opens; an `ErrorEvent(UnhandledIntent)` is emitted |

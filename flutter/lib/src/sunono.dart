@@ -88,6 +88,9 @@ abstract final class Sunono {
   /// After login, logout or a cart replacement (e.g. `mergeCarts`).
   static Future<void> refreshCartBinding() => controller.refreshCartBinding();
 
+  /// Pull the latest cart, e.g. when the host's cart screen opens.
+  static Future<void> refreshCart() => controller.refreshCart();
+
   /// The chat as a full-height bottom sheet, e.g. from a product page:
   /// `Sunono.open(context, initialMessage: 'متوفر بمقاس 42؟')`.
   static Future<void> open(BuildContext context,

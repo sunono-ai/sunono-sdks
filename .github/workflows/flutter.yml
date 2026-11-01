@@ -29,10 +29,13 @@ jobs:
           channel: stable
           flutter-version: ${{ matrix.flutter-version != 'stable' && matrix.flutter-version || '' }}
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test
+      # Format and publish checks once, on the moving target.
+      - if: matrix.flutter-version == 'stable'
+        run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
-      - run: dart pub publish --dry-run
+      - if: matrix.flutter-version == 'stable'
+        run: dart pub publish --dry-run
 
   # Tag `flutter-v<version>` (matching pubspec) to publish. Needs pub.dev
   # "Automated publishing" on for this repo with tag pattern
