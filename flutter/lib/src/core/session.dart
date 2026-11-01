@@ -6,10 +6,13 @@ import 'host.dart';
 /// The anonymous shopper (durable `user_id`) and its short-lived token
 /// (PROTOCOL §2). Token fetches are single-flight.
 class Session {
-  Session(this._api, this._storage);
+  Session(this._api, this._storage, {this.onPlatformDisabled});
 
   final SunonoApi _api;
   final SunonoStorage _storage;
+
+  /// Called when any authed call is answered `403 platform_disabled`.
+  final void Function()? onPlatformDisabled;
 
   String get _key => 'sunono.user_id.${_api.shopKey}';
 
@@ -73,10 +76,15 @@ class Session {
   /// Runs [call] with a token, re-initing once on an auth failure.
   Future<T> authed<T>(Future<T> Function(String token) call) async {
     try {
-      return await call(await token());
+      try {
+        return await call(await token());
+      } on SunonoHttpException catch (e) {
+        if (!e.isAuth) rethrow;
+        return await call(await token(force: true));
+      }
     } on SunonoHttpException catch (e) {
-      if (!e.isAuth) rethrow;
-      return call(await token(force: true));
+      if (e.isPlatformDisabled) onPlatformDisabled?.call();
+      rethrow;
     }
   }
 

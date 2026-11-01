@@ -13,6 +13,9 @@ class FakeServer {
   Map<String, dynamic> chatReply = {'reply': 'تمام', 'msg_ref': 'msg_ok', 'action_data': <String, dynamic>{}};
   List<Map<String, dynamic>> historyRows = [];
   int? failChatOnceWith;
+
+  /// The JSON body of the one-shot [failChatOnceWith] failure.
+  Map<String, dynamic> failChatBody = {'message': 'nope'};
   bool dropChat = false;
   Future<void> Function()? beforeChatReply;
   StreamController<List<int>>? live;
@@ -60,7 +63,7 @@ class FakeServer {
         if (failChatOnceWith != null) {
           final s = failChatOnceWith!;
           failChatOnceWith = null;
-          return _json({'message': 'nope'}, s);
+          return _json(failChatBody, s);
         }
         await beforeChatReply?.call();
         return _json(chatReply);

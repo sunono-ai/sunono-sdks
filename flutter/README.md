@@ -25,7 +25,7 @@ void main() {
     shopKey: 'pk_live_…',
     appOrigin: 'https://your-store.example',
     locale: 'ar',                       // follow your app: Sunono.setLocale('en')
-    storage: MySecureStorage(),         // persists the anonymous shopper (see below)
+    storage: MySecureStorage(),         // required: persists the anonymous shopper (see below)
     onIntent: (intent) {
       switch (intent) {
         case OpenProductIntent(:final sku): router.push('/products/$sku');
@@ -52,7 +52,7 @@ Sunono.open(context, initialMessage: 'Is this available in size 42?');
 
 ## Storage
 
-The SDK identifies the shopper with an anonymous id that should survive app restarts, so the cart and chat history come back. Implement `SunonoStorage` over secure storage:
+The SDK identifies the shopper with an anonymous id that should survive app restarts, so the cart and chat history come back. `storage` is required. Implement `SunonoStorage` over secure storage (`MemoryStorage` is for tests and demos: it starts a new shopper on every launch):
 
 ```dart
 class MySecureStorage implements SunonoStorage {
@@ -95,6 +95,7 @@ Pass `pickImage` to `Sunono.init` to show the photo button. Return a JPEG resize
 
 - Prices are shown exactly as the store sends them (Latin digits, up to 2 decimals).
 - iOS and Android are the targets. On Flutter **web**, leave `appOrigin` null (browsers set `Origin` themselves and refuse a custom one).
+- `apiBaseUrl` must be https (plain http only for `localhost`, `127.0.0.1` and the Android emulator's `10.0.2.2`).
 - `{"enabled": false}` in the shop's widget settings is a remote kill switch: the view shows an "unavailable" state.
 - Protocol and conformance fixtures: [`protocol/`](https://github.com/sunono-ai/sunono-sdks/tree/main/protocol).
 

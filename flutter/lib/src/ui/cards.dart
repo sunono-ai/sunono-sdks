@@ -52,6 +52,18 @@ class ProductCarousel extends StatelessWidget {
       );
 }
 
+/// A remote image decoded no larger than it is shown ([width] logical px at
+/// the device's pixel ratio), so a huge or hostile image can't balloon memory.
+/// A failed load shows [fallback], or a neutral broken-image icon.
+Widget boundedNetworkImage(BuildContext context, String url, {required double width, Widget Function()? fallback}) =>
+    Image.network(
+      url,
+      fit: BoxFit.cover,
+      cacheWidth: (width * MediaQuery.devicePixelRatioOf(context)).ceil(),
+      errorBuilder: (_, __, ___) =>
+          fallback?.call() ?? const SizedBox(height: 80, child: Center(child: Icon(Icons.broken_image_outlined))),
+    );
+
 class ProductTile extends StatelessWidget {
   const ProductTile(
       {super.key, required this.product, required this.theme, required this.lang, required this.onOpen, this.onAdd});
@@ -93,7 +105,7 @@ class ProductTile extends StatelessWidget {
                 aspectRatio: 1.15,
                 child: Stack(fit: StackFit.expand, children: [
                   if (image != null)
-                    Image.network(image, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _noImage())
+                    boundedNetworkImage(context, image, width: 164, fallback: _noImage)
                   else
                     _noImage(),
                   if (!p.inStock)

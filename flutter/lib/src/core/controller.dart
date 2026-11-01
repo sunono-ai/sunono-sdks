@@ -69,6 +69,10 @@ class ChatMessage {
 
 class _Outgoing {
   _Outgoing(this.text, this.synthetic, this.image, this.productId, this.user);
+
+  /// Minted once per message and reused by every retry, so the server can
+  /// answer a repeat with the stored reply instead of running the turn twice.
+  final String clientMessageId = uuidV4();
   final String text;
   final bool synthetic;
   final SunonoImage? image;
@@ -87,9 +91,11 @@ class SunonoChatController extends ChangeNotifier {
     this.cartBridge,
     this.onIntent,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
+    DateTime Function() clock = DateTime.now,
   })  : _api = api,
+        _clock = clock,
         _lang = lang {
-    _session = Session(api, storage);
+    _session = Session(api, storage, onPlatformDisabled: () => _disable('platform_disabled'));
     _live = LiveConnection(
       api: api,
       session: _session,
@@ -110,11 +116,21 @@ class SunonoChatController extends ChangeNotifier {
   /// Delays between history checks while recovering (cumulative waits).
   final List<Duration> recoveryChecks;
 
+  final DateTime Function() _clock;
+
+  /// Config older than this is re-fetched on [resume].
+  static const _configMaxAge = Duration(seconds: 60);
+
+  /// The newest messages kept on screen (and in memory).
+  static const _maxMessages = 300;
+
   final _events = StreamController<SunonoEvent>.broadcast();
   final List<ChatMessage> _messages = [];
   String _lang;
   ChatStatus _status = ChatStatus.idle;
   ShopConfig _config = const ShopConfig();
+  DateTime? _configAt;
+  String? _disabledReason;
   Cart? _cart;
   bool _paused = false;
   bool _typingHint = true;
@@ -135,6 +151,12 @@ class SunonoChatController extends ChangeNotifier {
   ShopConfig get config => _config;
   Cart? get cart => _cart;
 
+  /// Why the chat is [ChatStatus.disabled] (`platform_disabled`), when known.
+  String? get disabledReason => _disabledReason;
+
+  /// This SDK is older than the shop's `app.min_sdk_version`: show an update notice.
+  bool get updateRequired => _versionBelow(sdkVersion, _config.minSdkVersion);
+
   /// A human currently owns the conversation.
   bool get paused => _paused;
 
@@ -150,6 +172,7 @@ class SunonoChatController extends ChangeNotifier {
   }
 
   void _changed() {
+    if (_messages.length > _maxMessages) _messages.removeRange(0, _messages.length - _maxMessages);
     if (!_disposed) notifyListeners();
   }
 
@@ -184,16 +207,17 @@ class SunonoChatController extends ChangeNotifier {
     _changed();
     try {
       _config = await _api.config();
+      _configAt = _clock();
     } catch (e, s) {
       _emit(ErrorEvent(e, s)); // keep defaults: config is presentation only
     }
     if (epoch != _epoch) return;
     if (!_config.enabled) {
-      _status = ChatStatus.disabled;
-      _changed();
+      _disable(_config.disabledReason);
       return;
     }
     _typingHint = _config.typingHint;
+    _disabledReason = null;
     _status = ChatStatus.ready;
     _ensureTried = false;
     _changed();
@@ -205,9 +229,43 @@ class SunonoChatController extends ChangeNotifier {
   /// App went to background: drop the live connection.
   void suspend() => _live.stop();
 
-  /// App came back: history first, then live again; re-check the cart link.
+  /// The kill switch (config or a `403 platform_disabled`): stop everything.
+  void _disable(String? reason) {
+    if (_disposed) return;
+    _status = ChatStatus.disabled;
+    _disabledReason = reason;
+    _live.stop();
+    _changed();
+  }
+
+  /// Re-fetch the config, applying the kill switch and `typing_hint`. A failed
+  /// fetch keeps the old config and is retried on the next resume.
+  Future<void> _refreshConfig() async {
+    final epoch = _epoch;
+    final previous = _configAt;
+    _configAt = _clock(); // claimed up front: resume bursts don't fan out
+    try {
+      final fresh = await _api.config();
+      if (epoch != _epoch || _disposed) return;
+      _config = fresh;
+      _typingHint = fresh.typingHint;
+      if (!fresh.enabled) {
+        _disable(fresh.disabledReason);
+        return;
+      }
+      _changed();
+    } catch (e, s) {
+      _configAt = previous;
+      _emit(ErrorEvent(e, s));
+    }
+  }
+
+  /// App came back: config if stale, history first, then live again; re-check
+  /// the cart link.
   void resume() {
     if (_status != ChatStatus.ready) return;
+    final at = _configAt;
+    if (at == null || _clock().difference(at) > _configMaxAge) unawaited(_refreshConfig());
     unawaited(_bind(ensure: false));
     _live.start();
   }
@@ -248,6 +306,7 @@ class SunonoChatController extends ChangeNotifier {
       final bound = await _api.bindCart(uid, proof);
       if (epoch == _epoch) _bound = bound;
     } catch (e, s) {
+      if (e is SunonoHttpException && e.isPlatformDisabled) _disable('platform_disabled');
       _emit(ErrorEvent(e, s)); // never loops: next open/resume/refresh tries again
     }
   }
@@ -295,13 +354,18 @@ class SunonoChatController extends ChangeNotifier {
         await _bind(ensure: true);
       }
       final result = out.image == null
-          ? await _session
-              .authed((t) => _api.chat(t, out.text, lang: _lang, synthetic: out.synthetic, productId: out.productId))
+          ? await _session.authed((t) => _api.chat(t, out.text,
+              lang: _lang, synthetic: out.synthetic, productId: out.productId, clientMessageId: out.clientMessageId))
           : await _photoTurn(out, bot);
       if (epoch == _epoch) _apply(bot, result);
     } on SunonoHttpException catch (e) {
       if (epoch != _epoch) return;
-      if (e.status < 500) {
+      if (e.isPlatformDisabled) {
+        _messages.remove(bot); // the session already switched us to disabled
+      } else if (e.isTurnInProgress) {
+        // The turn is running server-side: wait for it, never resend.
+        await _recover(bot, out, epoch);
+      } else if (e.status < 500) {
         // 4xx (rate limit, origin, bad photo…) is refused before any work.
         _fail(bot, switch (e.status) { 429 => 'rate_limited', _ => e.code ?? 'http_${e.status}' });
       } else {
@@ -326,7 +390,11 @@ class SunonoChatController extends ChangeNotifier {
     return _session.authed((t) async {
       TurnResult? done;
       await for (final SseFrame f in _api.chatStream(t, out.text,
-          lang: _lang, synthetic: out.synthetic, productId: out.productId, imageRef: ref)) {
+          lang: _lang,
+          synthetic: out.synthetic,
+          productId: out.productId,
+          imageRef: ref,
+          clientMessageId: out.clientMessageId)) {
         final j = f.json;
         if (j == null) continue;
         switch (j['type']) {
@@ -583,4 +651,19 @@ class SunonoChatController extends ChangeNotifier {
   }
 
   void openUrl(String url) => _hand(OpenUrlIntent(url));
+}
+
+/// Whether [have] is older than [min] (`x.y.z`; a pre-release suffix is ignored).
+bool _versionBelow(String have, String? min) {
+  List<int>? parse(String v) {
+    final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)').firstMatch(v);
+    return m == null ? null : [for (var i = 1; i <= 3; i++) int.parse(m[i]!)];
+  }
+
+  final a = parse(have), b = min == null ? null : parse(min);
+  if (a == null || b == null) return false;
+  for (var i = 0; i < 3; i++) {
+    if (a[i] != b[i]) return a[i] < b[i];
+  }
+  return false;
 }

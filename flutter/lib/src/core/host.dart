@@ -3,8 +3,8 @@ import 'dart:typed_data';
 import 'models.dart';
 
 /// Persists the anonymous shopper id across launches. Pass one backed by
-/// secure storage (e.g. `flutter_secure_storage`); the default forgets it on
-/// every cold start, which starts a new shopper each launch.
+/// secure storage (e.g. `flutter_secure_storage`); [MemoryStorage] forgets it
+/// on every cold start, which starts a new shopper each launch.
 abstract interface class SunonoStorage {
   Future<String?> read(String key);
   Future<void> write(String key, String value);

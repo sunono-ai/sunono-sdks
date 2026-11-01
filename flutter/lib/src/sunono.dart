@@ -21,6 +21,7 @@ abstract final class Sunono {
   ///   (and cart-sync storefront origins), usually your storefront, e.g.
   ///   `https://shop.example`. Sent as `Origin`, since apps have none.
   /// - [storage]: persists the anonymous shopper id (use secure storage).
+  ///   Required: without a persistent one every cold start is a new shopper.
   /// - [cartBridge]: Magento cart sync proofs, if your shop uses it.
   /// - [pickImage]: enables photo messages.
   /// - [onIntent]: route product/cart/checkout taps; return true if handled.
@@ -29,7 +30,7 @@ abstract final class Sunono {
     String? appOrigin,
     String apiBaseUrl = 'https://api.sunono.ai/api',
     String locale = 'ar',
-    SunonoStorage? storage,
+    required SunonoStorage storage,
     SunonoCartBridge? cartBridge,
     Future<SunonoImage?> Function()? pickImage,
     bool Function(SunonoIntent intent)? onIntent,
@@ -46,7 +47,7 @@ abstract final class Sunono {
         appOrigin: appOrigin,
         clientFactory: httpClientFactory,
       ),
-      storage: storage ?? MemoryStorage(),
+      storage: storage,
       lang: locale,
       cartBridge: cartBridge,
       onIntent: onIntent,

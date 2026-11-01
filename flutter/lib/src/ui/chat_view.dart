@@ -127,8 +127,10 @@ class _SunonoChatViewState extends State<SunonoChatView> with WidgetsBindingObse
     final rtl = lang == 'ar';
 
     Widget body;
-    if (_c.status == ChatStatus.disabled) {
-      body = Center(child: Text(t.disabled, style: theme.text(color: theme.muted)));
+    if (_c.status == ChatStatus.disabled || _c.updateRequired) {
+      body = Center(
+          child: Text(_c.status == ChatStatus.disabled ? t.disabled : t.updateApp,
+              textAlign: TextAlign.center, style: theme.text(color: theme.muted)));
     } else {
       final msgs = _c.messages;
       final lastBot = msgs.lastIndexWhere((m) => m.role == ChatRole.bot && m.state == MessageState.done);
@@ -342,7 +344,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
                     width: 180,
                     child: m.localImage != null
                         ? Image.memory(m.localImage!, fit: BoxFit.cover)
-                        : Image.network(m.imageUrl!, fit: BoxFit.cover),
+                        : boundedNetworkImage(context, m.imageUrl!, width: 180),
                   ),
                 ),
               ),
@@ -397,7 +399,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
       if (m.imageUrl != null) {
         children.add(ClipRRect(
           borderRadius: BorderRadius.circular(16),
-          child: SizedBox(width: 200, child: Image.network(m.imageUrl!, fit: BoxFit.cover)),
+          child: SizedBox(width: 200, child: boundedNetworkImage(context, m.imageUrl!, width: 200)),
         ));
       }
       if (m.text.trim().isNotEmpty) {

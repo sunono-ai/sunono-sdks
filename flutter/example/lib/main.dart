@@ -6,10 +6,13 @@ import 'package:sunono/sunono.dart';
 /// (first `flutter create .` inside example/ to generate the platform folders).
 void main() {
   Sunono.init(
-    shopKey: const String.fromEnvironment('SUNONO_SHOP_KEY', defaultValue: 'pk_test'),
-    appOrigin: const String.fromEnvironment('SUNONO_APP_ORIGIN', defaultValue: 'https://shop.example'),
+    shopKey: const String.fromEnvironment('SUNONO_SHOP_KEY',
+        defaultValue: 'pk_test'),
+    appOrigin: const String.fromEnvironment('SUNONO_APP_ORIGIN',
+        defaultValue: 'https://shop.example'),
     locale: 'ar',
-    // storage: YourSecureStorage(),   // persist the shopper across launches
+    // Demo only: forgets the shopper on every launch. Use secure storage in a real app.
+    storage: MemoryStorage(),
     // cartBridge: YourMagentoBridge(), // Magento cart sync
     onIntent: (intent) {
       switch (intent) {
@@ -49,17 +52,22 @@ class _ExampleAppState extends State<ExampleApp> {
             body: _tab == 0
                 ? Center(
                     child: FilledButton(
-                      onPressed: () => Sunono.open(context, initialMessage: 'شو عندكم عروض اليوم؟'),
+                      onPressed: () => Sunono.open(context,
+                          initialMessage: 'شو عندكم عروض اليوم؟'),
                       child: const Text('Ask about a product'),
                     ),
                   )
-                : Sunono.view(theme: SunonoTheme.fromMaterial(Theme.of(context), accent: const Color(0xFFF2A900))),
+                : Sunono.view(
+                    theme: SunonoTheme.fromMaterial(Theme.of(context),
+                        accent: const Color(0xFFF2A900))),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _tab,
               onDestinationSelected: (i) => setState(() => _tab = i),
               destinations: const [
-                NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-                NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), label: 'Chat'),
+                NavigationDestination(
+                    icon: Icon(Icons.home_outlined), label: 'Home'),
+                NavigationDestination(
+                    icon: Icon(Icons.auto_awesome_outlined), label: 'Chat'),
               ],
             ),
           ),
