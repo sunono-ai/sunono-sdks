@@ -148,7 +148,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         _clock = clock,
         _lang = lang ?? 'ar',
         _langPinned = lang != null {
-    _session = Session(api, storage, onPlatformDisabled: () => _disable('platform_disabled'));
+    _session = Session(api, storage,
+        onPlatformDisabled: () => _disable('platform_disabled'), onStorageError: (e, s) => _emit(ErrorEvent(e, s)));
     _live = LiveConnection(
       api: api,
       session: _session,

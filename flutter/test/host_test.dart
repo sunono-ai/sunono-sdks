@@ -326,6 +326,27 @@ void main() {
     });
   });
 
+  group('secure storage fails', () {
+    for (final (name, setup) in [
+      ('read throws', (_FlakyStorage s) => s.failUserIdRead = true),
+      ('read hangs', (_FlakyStorage s) => s.hangUserIdRead = true),
+      ('write throws', (_FlakyStorage s) => s.failUserIdWrite = true),
+    ]) {
+      test('$name: chat still sends on an in-memory shopper, and it is reported', () async {
+        final storage = _FlakyStorage();
+        setup(storage);
+        c.dispose();
+        c = make(storage: storage);
+        await c.open();
+        await c.send('hi').timeout(const Duration(seconds: 15));
+        expect(c.messages.last.text, server.chatReply['reply']);
+        expect(c.userId, isNotNull);
+        expect(events.whereType<ErrorEvent>().map((e) => '${e.error}'),
+            anyElement(anyOf(contains('keychain'), contains('TimeoutException'))));
+      }, timeout: const Timeout(Duration(seconds: 30)));
+    }
+  });
+
   group('reset forgets the device', () {
     const pendingKey = 'sunono.pending_forget.pk_test';
 
@@ -662,6 +683,26 @@ void main() {
 class _FlakyStorage extends MemoryStorage {
   bool failUserIdDelete = false;
   bool hangUserIdDelete = false;
+  bool failUserIdRead = false;
+  bool hangUserIdRead = false;
+  bool failUserIdWrite = false;
+  bool hangPendingWrite = false;
+
+  @override
+  Future<String?> read(String key) {
+    if (key.startsWith('sunono.user_id.')) {
+      if (failUserIdRead) return Future.error(StateError('keychain locked'));
+      if (hangUserIdRead) return Completer<String?>().future;
+    }
+    return super.read(key);
+  }
+
+  @override
+  Future<void> write(String key, String value) {
+    if (key.startsWith('sunono.user_id.') && failUserIdWrite) return Future.error(StateError('keychain locked'));
+    if (key.startsWith('sunono.pending_forget.') && hangPendingWrite) return Completer<void>().future;
+    return super.write(key, value);
+  }
 
   @override
   Future<void> delete(String key) {

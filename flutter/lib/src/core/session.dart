@@ -6,13 +6,17 @@ import 'host.dart';
 /// The anonymous shopper (durable `user_id`) and its short-lived token
 /// (PROTOCOL §2). Token fetches are single-flight.
 class Session {
-  Session(this._api, this._storage, {this.onPlatformDisabled});
+  Session(this._api, this._storage, {this.onPlatformDisabled, this.onStorageError});
 
   final SunonoApi _api;
   final SunonoStorage _storage;
 
   /// Called when any authed call is answered `403 platform_disabled`.
   final void Function()? onPlatformDisabled;
+
+  /// Called when storage fails or hangs past [storageTimeout]; chat goes on
+  /// with the id in memory.
+  final void Function(Object error, StackTrace stack)? onStorageError;
 
   String get _key => 'sunono.user_id.${_api.shopKey}';
 
@@ -42,21 +46,32 @@ class Session {
   Future<String> _loadId(int gen) async {
     // Never read back the id a reset is deleting. If that delete failed or
     // hung, the key may still hold the old shopper: mint a fresh one instead
-    // and overwrite the key as best we can.
+    // and overwrite the key as best we can. A read that fails or hangs mints
+    // one for this process too, so chat never waits on a broken keychain.
     final clean = await (_clearing ?? Future.value(true));
-    var id = clean ? await _storage.read(_key) : null;
+    String? id;
+    if (clean) {
+      try {
+        id = await _storage.read(_key).timeout(storageTimeout);
+      } catch (e, s) {
+        onStorageError?.call(e, s);
+      }
+    }
     if (id == null || !_uuid.hasMatch(id)) {
       id = uuidV4();
-      if (clean) {
-        await _storage.write(_key, id);
-      } else {
-        try {
-          await _storage.write(_key, id).timeout(storageTimeout);
-        } catch (_) {}
-      }
+      await _save(id);
     }
     if (gen == _gen) _userId = id;
     return id;
+  }
+
+  /// Best effort: a failed or hung write keeps the id in memory only.
+  Future<void> _save(String id) async {
+    try {
+      await _storage.write(_key, id).timeout(storageTimeout);
+    } catch (e, s) {
+      onStorageError?.call(e, s);
+    }
   }
 
   /// The current token, if one was fetched (for a forget after [reset]).
@@ -81,7 +96,7 @@ class Session {
     if (res.userId != id) {
       // The server rejected our id and minted one: adopt it.
       _userId = res.userId;
-      await _storage.write(_key, res.userId);
+      await _save(res.userId);
     }
     return _token = res.token;
   }
