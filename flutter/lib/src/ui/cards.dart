@@ -268,7 +268,7 @@ class ProductTile extends StatelessWidget {
         child: Text(label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.text(size: 11, weight: FontWeight.w600, color: Colors.white)),
+            style: theme.text(size: 11, weight: FontWeight.w600, color: onColor(color))),
       );
 
   /// ⓘ on the image's top-end corner, as on the web.

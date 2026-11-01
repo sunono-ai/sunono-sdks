@@ -40,13 +40,20 @@ class Session {
   }
 
   Future<String> _loadId(int gen) async {
-    try {
-      await _clearing; // never read back the id a reset is deleting
-    } catch (_) {}
-    var id = await _storage.read(_key);
+    // Never read back the id a reset is deleting. If that delete failed or
+    // hung, the key may still hold the old shopper: mint a fresh one instead
+    // and overwrite the key as best we can.
+    final clean = await (_clearing ?? Future.value(true));
+    var id = clean ? await _storage.read(_key) : null;
     if (id == null || !_uuid.hasMatch(id)) {
       id = uuidV4();
-      await _storage.write(_key, id);
+      if (clean) {
+        await _storage.write(_key, id);
+      } else {
+        try {
+          await _storage.write(_key, id).timeout(storageTimeout);
+        } catch (_) {}
+      }
     }
     if (gen == _gen) _userId = id;
     return id;
@@ -96,17 +103,21 @@ class Session {
 
   /// Forget the shopper (logout / account switch): next use mints a new one.
   /// Memory is cleared before this returns; the future resolves to the id that
-  /// was stored (null when none) once it is deleted.
+  /// was stored once it is deleted, or null (none stored, or storage failed or
+  /// hung past [storageTimeout]). It never throws.
   Future<String?> reset() {
     _gen++;
     _userId = null;
     _token = null;
     _pending = null;
     _idPending = null;
-    return _clearing = _clear();
+    final clear = _clear().timeout(storageTimeout);
+    _clearing = clear.then((_) => true, onError: (Object _) => false);
+    return clear.then<String?>((id) => id, onError: (Object _) => null);
   }
 
-  Future<void>? _clearing;
+  /// Whether the last reset's delete went through.
+  Future<bool>? _clearing;
 
   Future<String?> _clear() async {
     final id = await _storage.read(_key);
@@ -114,6 +125,9 @@ class Session {
     return id != null && _uuid.hasMatch(id) ? id : null;
   }
 }
+
+/// The longest a reset waits on storage before treating it as failed.
+const storageTimeout = Duration(seconds: 5);
 
 final _uuid = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
 

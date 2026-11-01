@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:sunono/sunono.dart';
 import 'package:sunono/src/ui/cards.dart';
-import 'package:sunono/src/ui/theme.dart' show contrastRatio;
+import 'package:sunono/src/ui/theme.dart' show contrastRatio, onColor;
 
 import 'fake_server.dart';
 
@@ -186,6 +186,59 @@ void main() {
       expect(t.onPrimary.computeLuminance(), lessThan(0.1));
       expect(contrastRatio(t.onPrimary, t.primary), greaterThanOrEqualTo(4.5));
       expect(contrastRatio(t.primaryText, t.surface), greaterThanOrEqualTo(4.5));
+    });
+
+    test('light scheme: primaryText reads on both the white surface and the #F7F7FB background', () {
+      for (final hex in [0xFF8A7CFF, 0xFF57227D, 0xFFFFE066, 0xFF00C2FF, 0xFF6C4BFF, 0xFF9E9E9E]) {
+        final t = SunonoTheme.fromConfig(ShopConfig(primaryColor: Color(hex)), fallback: const SunonoTheme());
+        expect(t.background, const Color(0xFFF7F7FB));
+        expect(contrastRatio(t.primaryText, t.surface), greaterThanOrEqualTo(4.5), reason: hex.toRadixString(16));
+        expect(contrastRatio(t.primaryText, t.background), greaterThanOrEqualTo(4.5), reason: hex.toRadixString(16));
+      }
+    });
+
+    test('copyWith(primary:) recomputes onPrimary and primaryText unless passed', () {
+      const base = SunonoTheme();
+      final t = base.copyWith(primary: const Color(0xFFFFE066));
+      expect(t.onPrimary.computeLuminance(), lessThan(0.1));
+      expect(contrastRatio(t.onPrimary, t.primary), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(t.primaryText, t.surface), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(t.primaryText, t.background), greaterThanOrEqualTo(4.5));
+      final kept = base.copyWith(primary: const Color(0xFFFFE066), onPrimary: Colors.red, primaryText: Colors.blue);
+      expect(kept.onPrimary, Colors.red);
+      expect(kept.primaryText, Colors.blue);
+      final same = t.copyWith(accent: Colors.green);
+      expect(same.onPrimary, t.onPrimary);
+      expect(same.primaryText, t.primaryText);
+    });
+
+    test('badge fills (accent, muted, danger) get readable text, light and dark; staff label reads', () {
+      final themes = [
+        const SunonoTheme(),
+        SunonoTheme.fromConfig(const ShopConfig(colorScheme: 'dark'), fallback: const SunonoTheme()),
+      ];
+      for (final t in themes) {
+        for (final fill in [t.accent, t.muted, t.danger]) {
+          expect(contrastRatio(onColor(fill), fill), greaterThanOrEqualTo(4.5), reason: '$fill');
+        }
+        expect(contrastRatio(t.accentText, t.surface), greaterThanOrEqualTo(4.5));
+      }
+      expect(const SunonoTheme().onAccent.computeLuminance(), lessThan(0.1), reason: 'dark text on #00C2FF');
+    });
+
+    testWidgets('the Sale badge on the default accent uses dark text', (tester) async {
+      final p = ProductCard.fromJson({
+        'public_id': 'p',
+        'title_en': 'Coffee',
+        'price_jod': 10,
+        'discount_jod': 8,
+        'price_from': 8,
+        'on_sale': true,
+        'has_image': false,
+      });
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(body: ProductTile(product: p, theme: const SunonoTheme(), lang: 'en', onOpen: () {}))));
+      expect(tester.widget<Text>(find.text('Sale')).style!.color, const SunonoTheme().onAccent);
     });
 
     test('fromMaterial: onPrimary is the scheme onPrimary', () {
@@ -382,6 +435,62 @@ void main() {
       expect(await storage.read(pendingKey), '22222222-2222-4222-8222-222222222222');
     });
 
+    test('a failing storage delete never brings the old shopper back', () async {
+      final storage = _FlakyStorage();
+      c.dispose();
+      c = make(storage: storage);
+      await c.open();
+      await server.until(() => server.live != null);
+      final old = c.userId;
+      storage.failUserIdDelete = true;
+      final mark = server.requests.length;
+      await c.reset();
+      await server.until(() => server.count('/chat/subscribe?') == 2);
+      expect(c.userId, isNot(old));
+      expect(await storage.read('sunono.user_id.pk_test'), c.userId, reason: 'the key was overwritten');
+      await server.until(() => server.count('/chat/forget') == 1);
+      final after = server.requests.skip(mark).toList();
+      for (final r in after) {
+        final auth = r.headers['Authorization'];
+        if (r.url.path.endsWith('/chat/forget')) {
+          expect(auth, 'Bearer tok1');
+        } else {
+          expect(auth, isNot('Bearer tok1'), reason: r.url.path);
+        }
+      }
+      final inits = server.bodies['/shops/init']!.skip(1).map((b) => jsonDecode(b)['user_id']);
+      expect(inits, isNot(contains(old)));
+    });
+
+    test('a hung storage delete: reset still resolves and a fresh shopper is used', () async {
+      final storage = _FlakyStorage();
+      c.dispose();
+      c = make(storage: storage);
+      await c.open();
+      await server.until(() => server.live != null);
+      final old = c.userId;
+      storage.hangUserIdDelete = true;
+      await c.reset().timeout(const Duration(seconds: 1), onTimeout: () => fail('reset waited on storage'));
+      // The new session waits out the hung delete (storageTimeout), then mints afresh.
+      await server.until(() => server.count('/chat/subscribe?') == 2, timeout: const Duration(seconds: 10));
+      expect(c.userId, isNot(old));
+      await server.until(() => server.count('/chat/forget') == 1);
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    test('two quick resets forget both shoppers', () async {
+      await c.open();
+      await server.until(() => server.live != null);
+      final a = c.userId;
+      await c.reset();
+      await server.until(() => c.userId != null && c.userId != a);
+      final b = c.userId;
+      await c.reset();
+      await server.until(() => server.count('/chat/forget') == 2);
+      final tokens =
+          server.requests.where((r) => r.url.path.endsWith('/chat/forget')).map((r) => r.headers['Authorization']);
+      expect(tokens.toSet(), hasLength(2), reason: 'each with its own shopper token ($a, $b)');
+    });
+
     test('a controller never used sends no forget', () async {
       await c.reset();
       await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -547,4 +656,19 @@ void main() {
       expect(tester.widget<Image>(find.byType(Image)).semanticLabel, 'Dates');
     });
   });
+}
+
+/// Storage whose delete of the shopper id fails or never completes.
+class _FlakyStorage extends MemoryStorage {
+  bool failUserIdDelete = false;
+  bool hangUserIdDelete = false;
+
+  @override
+  Future<void> delete(String key) {
+    if (key.startsWith('sunono.user_id.')) {
+      if (failUserIdDelete) return Future.error(StateError('keychain locked'));
+      if (hangUserIdDelete) return Completer<void>().future;
+    }
+    return super.delete(key);
+  }
 }

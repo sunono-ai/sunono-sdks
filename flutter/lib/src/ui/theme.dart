@@ -14,7 +14,7 @@ class SunonoTheme {
     this.onSurface = const Color(0xFF1C1B22),
     this.muted = const Color(0xFF75727F),
     this.success = const Color(0xFF078B5B),
-    this.danger = const Color(0xFFD83A5F),
+    this.danger = const Color(0xFFD6365C),
     this.fontFamily,
     this.radius = 20,
     this.onPrimary = Colors.white,
@@ -45,17 +45,14 @@ class SunonoTheme {
     final primary = config.primaryColor ?? fallback.primary;
     final dark = config.colorScheme == 'dark';
     final surface = dark ? const Color(0xFF1F1D26) : fallback.surface;
+    final background =
+        dark ? Color.alphaBlend(primary.withValues(alpha: 0.05), const Color(0xFF131218)) : fallback.background;
     return SunonoTheme(
       primary: primary,
-      onPrimary: config.primaryColor == null
-          ? fallback.onPrimary
-          : ThemeData.estimateBrightnessForColor(primary) == Brightness.dark
-              ? Colors.white
-              : const Color(0xFF1C1B22),
-      primaryText: readableOn(primary, surface),
+      onPrimary: config.primaryColor == null ? fallback.onPrimary : onColor(primary),
+      primaryText: readableOn(primary, surface, background),
       accent: fallback.accent,
-      background:
-          dark ? Color.alphaBlend(primary.withValues(alpha: 0.05), const Color(0xFF131218)) : fallback.background,
+      background: background,
       surface: surface,
       onSurface: dark ? const Color(0xFFECEAF2) : fallback.onSurface,
       muted: dark ? const Color(0xFFA9A5B4) : fallback.muted,
@@ -75,6 +72,12 @@ class SunonoTheme {
   /// shifted only as far as it must be to read (4.5:1).
   final Color primaryText;
   final Color accent;
+
+  /// Text on [accent] fills (badges).
+  Color get onAccent => onColor(accent);
+
+  /// [accent] as text on [surface]/[background], shifted to 4.5:1.
+  Color get accentText => readableOn(accent, surface, background);
   final Color background;
   final Color surface;
   final Color onSurface;
@@ -98,21 +101,33 @@ class SunonoTheme {
         BoxShadow(color: primary.withValues(alpha: 0.10), blurRadius: 18, offset: const Offset(0, 6)),
       ];
 
-  SunonoTheme copyWith({Color? primary, Color? accent, Color? background, Color? surface, String? fontFamily}) =>
-      SunonoTheme(
-        primary: primary ?? this.primary,
-        accent: accent ?? this.accent,
-        background: background ?? this.background,
-        surface: surface ?? this.surface,
-        onSurface: onSurface,
-        muted: muted,
-        success: success,
-        danger: danger,
-        fontFamily: fontFamily ?? this.fontFamily,
-        radius: radius,
-        onPrimary: onPrimary,
-        primaryText: primary == null ? primaryText : null,
-      );
+  /// A new [primary] recomputes [onPrimary] and [primaryText] (as does a new
+  /// surface or background for [primaryText]) unless they are passed too.
+  SunonoTheme copyWith(
+      {Color? primary,
+      Color? accent,
+      Color? background,
+      Color? surface,
+      String? fontFamily,
+      Color? onPrimary,
+      Color? primaryText}) {
+    final p = primary ?? this.primary, bg = background ?? this.background, sf = surface ?? this.surface;
+    return SunonoTheme(
+      primary: p,
+      accent: accent ?? this.accent,
+      background: bg,
+      surface: sf,
+      onSurface: onSurface,
+      muted: muted,
+      success: success,
+      danger: danger,
+      fontFamily: fontFamily ?? this.fontFamily,
+      radius: radius,
+      onPrimary: onPrimary ?? (primary == null ? this.onPrimary : onColor(p)),
+      primaryText: primaryText ??
+          (primary == null && background == null && surface == null ? this.primaryText : readableOn(p, sf, bg)),
+    );
+  }
 }
 
 /// WCAG contrast ratio of two colors (1..21).
@@ -121,13 +136,19 @@ double contrastRatio(Color a, Color b) {
   return (la > lb ? la + 0.05 : lb + 0.05) / (la > lb ? lb + 0.05 : la + 0.05);
 }
 
+/// White or near-black, whichever reads better on [fill].
+Color onColor(Color fill) {
+  const dark = Color(0xFF1C1B22);
+  return contrastRatio(Colors.white, fill) >= contrastRatio(dark, fill) ? Colors.white : dark;
+}
+
 /// [color] moved toward white (dark [surface]) or black (light) just until
-/// it reaches 4.5:1 against [surface].
-Color readableOn(Color color, Color surface) {
+/// it reaches 4.5:1 against [surface] and [background].
+Color readableOn(Color color, Color surface, [Color? background]) {
   final target = surface.computeLuminance() < 0.5 ? Colors.white : Colors.black;
   for (var t = 0.0; t <= 1; t += 0.05) {
     final c = Color.lerp(color, target, t)!;
-    if (contrastRatio(c, surface) >= 4.5) return c;
+    if (contrastRatio(c, surface) >= 4.5 && (background == null || contrastRatio(c, background) >= 4.5)) return c;
   }
   return target;
 }

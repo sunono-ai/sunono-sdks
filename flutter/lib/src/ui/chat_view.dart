@@ -518,7 +518,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
       if (m.role == ChatRole.staff) {
         children.add(Padding(
           padding: const EdgeInsetsDirectional.only(start: 6, bottom: 3),
-          child: Text(t.storeTeam, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.accent)),
+          child: Text(t.storeTeam, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.accentText)),
         ));
       }
       if (m.imageUrl != null) {

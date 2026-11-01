@@ -492,28 +492,33 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _status = ChatStatus.idle;
     if (!_disposed) _unread.value = 0;
     _changed();
-    try {
-      final stored = await cleared;
-      final id = oldId ?? stored;
-      if (id != null) {
-        await _storage.write(_pendingForgetKey, id);
-        _forgetPending(id: id, token: oldToken);
+    final id = oldId ?? await cleared; // the in-memory id even when storage failed
+    if (id != null) {
+      try {
+        await _storage.write(_pendingForgetKey, id).timeout(storageTimeout);
+      } catch (e, s) {
+        _emit(ErrorEvent(e, s)); // no retry later, but the forget still goes out now
       }
-    } catch (e, s) {
-      _emit(ErrorEvent(e, s)); // storage failed: the reset still goes ahead
+      _forgetPending(id: id, token: oldToken);
     }
     if (wasOpen && !_disposed) await open();
   }
 
-  /// Send the pending forget, if any (single-flight). [token] is used only
-  /// when the pending shopper is [id]; otherwise it is re-inited by its own id.
+  /// Send the forget for [id] (from a reset; queued behind one in flight) or
+  /// for the stored pending shopper (skipped while one is in flight). [token]
+  /// is [id]'s; anyone else is re-inited by their own id.
   void _forgetPending({String? id, String? token}) {
-    _forgetting ??= _runForget(id, token).whenComplete(() => _forgetting = null);
+    final prev = _forgetting;
+    if (prev != null && id == null) return;
+    late final Future<void> f;
+    f = _forgetting = (prev ?? Future<void>.value()).then((_) => _runForget(id, token)).whenComplete(() {
+      if (identical(_forgetting, f)) _forgetting = null;
+    });
   }
 
   Future<void> _runForget(String? id, String? token) async {
     try {
-      final old = await _storage.read(_pendingForgetKey);
+      final old = id ?? await _storage.read(_pendingForgetKey).timeout(storageTimeout);
       if (old == null) return;
       try {
         // Never through the session: its token and re-init are the NEW shopper's.
@@ -532,7 +537,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         if (e.status == 429 || e.status >= 500) return;
       }
       // A newer reset may have queued another shopper meanwhile: keep that one.
-      if (await _storage.read(_pendingForgetKey) == old) await _storage.delete(_pendingForgetKey);
+      if (await _storage.read(_pendingForgetKey).timeout(storageTimeout) == old) {
+        await _storage.delete(_pendingForgetKey).timeout(storageTimeout);
+      }
     } catch (_) {
       // offline: try on a later open
     }
