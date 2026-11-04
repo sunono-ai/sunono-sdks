@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sunono/sunono.dart';
 
+import 'package:sunono/src/ui/copy.dart';
+
 import 'fake_server.dart';
 
 /// An m4a-ish note (the server judges the bytes; the SDK only counts them).
@@ -17,6 +19,7 @@ class FakeRecorder implements SunonoVoiceRecorder {
   bool allow = true;
   Completer<bool>? gate;
   Object? startError;
+  Completer<void>? stopGate;
   SunonoAudio? next = SunonoAudio(_note(), mimeType: 'audio/mp4', duration: const Duration(seconds: 4));
   final levelsCtl = StreamController<double>.broadcast();
   int starts = 0, stops = 0, cancels = 0;
@@ -34,6 +37,7 @@ class FakeRecorder implements SunonoVoiceRecorder {
   @override
   Future<SunonoAudio?> stop() async {
     stops++;
+    await stopGate?.future;
     return next;
   }
 
@@ -44,12 +48,19 @@ class FakeRecorder implements SunonoVoiceRecorder {
 class FakePlayer implements SunonoAudioPlayer {
   final played = <({Uint8List? bytes, String? url})>[];
   int stops = 0;
+
+  /// just_audio-like: `playing` is false while the new source loads.
+  bool falseWhileLoading = false;
   final playingCtl = StreamController<bool>.broadcast();
   final positionCtl = StreamController<Duration>.broadcast();
 
   @override
   Future<void> play({Uint8List? bytes, String? url}) async {
     played.add((bytes: bytes, url: url));
+    if (falseWhileLoading) {
+      playingCtl.add(false);
+      await Future<void>.delayed(Duration.zero);
+    }
     playingCtl.add(true);
   }
 
@@ -468,6 +479,119 @@ void main() {
     });
   });
 
+  group('fix round 1', () {
+    test('reset while the recorder is stopping: the old note is never added or uploaded', () async {
+      await c.open();
+      rec.stopGate = Completer<void>();
+      await record();
+      final stopping = c.stopVoice();
+      await Future<void>.delayed(Duration.zero);
+      expect(c.canRecord, isFalse, reason: 'no second recording while the first stops');
+      await c.reset();
+      rec.stopGate!.complete();
+      await stopping;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(server.count('/chat/upload'), 0);
+      expect(c.messages.where((m) => m.isVoice), isEmpty);
+      expect(c.voice.value, isA<VoiceIdle>());
+    });
+
+    test('dispose mid-upload: a network failure after dispose never uploads again', () async {
+      await c.open();
+      final hold = Completer<void>();
+      server.beforeUpload = () async {
+        await hold.future;
+        throw http.ClientException('connection closed');
+      };
+      await record();
+      final sending = c.stopVoice();
+      await server.until(() => server.count('/chat/upload') == 1);
+      c.dispose();
+      hold.complete();
+      await sending;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(server.count('/chat/upload'), 1);
+      expect(server.count('/chat/stream'), 0);
+      c = make(); // tearDown disposes this one
+    });
+
+    test('a player that reports false while loading keeps the note playing until it really ends', () async {
+      player.falseWhileLoading = true;
+      server.historyRows = [
+        {
+          'role': 'user',
+          'sender': 'user',
+          'text': 'بدي شاحن',
+          'msg_ref': 'u1',
+          'audio': {'url': 'https://api.test/media/v1.mp3', 'duration_ms': 2500},
+        },
+      ];
+      await c.open();
+      await server.until(() => c.messages.isNotEmpty);
+      final m = c.messages.single;
+      await c.toggleVoicePlayback(m);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.playingVoice.value, m.id, reason: 'the loading false is not an end');
+      player.playingCtl.add(false); // ended
+      await Future<void>.delayed(Duration.zero);
+      expect(c.playingVoice.value, isNull);
+    });
+
+    test('history audio: https only, and only on the shopper\'s own rows', () async {
+      server.historyRows = [
+        {
+          'role': 'user',
+          'sender': 'user',
+          'text': 'a',
+          'msg_ref': 'u1',
+          'audio': {'url': 'http://api.test/media/v1.mp3', 'duration_ms': 1000},
+        },
+        {
+          'role': 'bot',
+          'sender': 'bot',
+          'text': 'b',
+          'msg_ref': 'b1',
+          'audio': {'url': 'https://api.test/media/v2.mp3', 'duration_ms': 1000},
+        },
+        {
+          'role': 'user',
+          'sender': 'user',
+          'text': 'c',
+          'msg_ref': 'u2',
+          'audio': {'url': 'https://api.test/media/v3.mp3', 'duration_ms': 1000},
+        },
+      ];
+      await c.open();
+      await server.until(() => c.messages.length == 3);
+      expect([for (final m in c.messages) m.audioUrl], [null, null, 'https://api.test/media/v3.mp3']);
+    });
+
+    test('customer_blocked on a voice note reads as messages, not photos', () async {
+      await c.open();
+      server.failUploadOnce = (403, 'customer_blocked');
+      await record();
+      await c.stopVoice();
+      expect(c.messages.last.errorCode, 'customer_blocked');
+      expect(c.messages.last.retryable, isFalse);
+      expect(SunonoCopy.of('ar').error('customer_blocked'), 'ما بنقدر نستقبل رسائلك هلّق');
+      expect(SunonoCopy.of('en').photoError('customer_blocked'), "We can't accept photos right now");
+    });
+
+    test('the kill switch stops playback', () async {
+      await c.open();
+      server.historyRows = [];
+      await record();
+      await c.stopVoice();
+      final note = c.messages.firstWhere((m) => m.isVoice);
+      await c.toggleVoicePlayback(note);
+      server.config = {'enabled': false};
+      now = now.add(const Duration(minutes: 5));
+      c.resume();
+      await server.until(() => c.status == ChatStatus.disabled);
+      expect(player.stops, 1);
+    });
+  });
+
   group('view', () {
     Widget app(Widget child, {double scale = 1, double width = 390}) => MaterialApp(
           home: MediaQuery(
@@ -545,6 +669,33 @@ void main() {
       expect(player.played, hasLength(1));
       expect(find.byTooltip('وقّف الرسالة الصوتية'), findsOneWidget);
       handle.dispose();
+      await done(tester);
+    });
+
+    testWidgets('leaving the chat (pop) mid-recording cancels the mic; nothing uploads at 60 s', (tester) async {
+      await pumpView(tester);
+      await tester.tap(find.byTooltip('سجّل رسالة صوتية'));
+      await settle(tester);
+      expect(c.voice.value, isA<VoiceRecording>());
+      await tester.pumpWidget(const SizedBox()); // the route popped
+      await settle(tester);
+      expect(rec.cancels, 1);
+      now = now.add(const Duration(seconds: 61));
+      await settle(tester);
+      expect(rec.stops, 0);
+      expect(server.count('/chat/upload'), 0);
+      c.suspend();
+    });
+
+    testWidgets('a route pushed over the chat mid-recording cancels the mic', (tester) async {
+      await pumpView(tester);
+      await tester.tap(find.byTooltip('سجّل رسالة صوتية'));
+      await settle(tester);
+      Navigator.of(tester.element(find.byType(SunonoChatView)))
+          .push(MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('product'))));
+      await settle(tester);
+      expect(rec.cancels, 1);
+      expect(c.voice.value, isA<VoiceIdle>());
       await done(tester);
     });
 

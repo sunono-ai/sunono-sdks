@@ -134,10 +134,13 @@ abstract interface class SunonoAudioPlayer {
   Future<void> play({Uint8List? bytes, String? url});
   Future<void> stop();
 
-  /// The playback position of the current note.
+  /// The playback position of the current note. Broadcast (it may be
+  /// listened to more than once).
   Stream<Duration> get position;
 
-  /// true while a note plays; false when it ends or stops.
+  /// Broadcast. true once a note is playing; false when it ends or is
+  /// stopped. A false before the first true (e.g. while the source loads) is
+  /// ignored, so a player that replays its current state is fine.
   Stream<bool> get playing;
 }
 

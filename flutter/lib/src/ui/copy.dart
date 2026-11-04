@@ -81,7 +81,7 @@ class SunonoCopy {
         'invalid_image' => _t('ما قدرنا نفتح هالصورة', "We couldn't open that photo"),
         'image_unavailable' =>
           _t('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام', "Photos aren't available right now — tell me in words"),
-        'customer_blocked' => _t('ما بنقدر نستقبل صور هلّق', "We can't accept photos right now"),
+        'customer_blocked' => _t('ما بنقدر نستقبل رسائلك هلّق', "We can't accept your messages right now"),
         'image_blocked' => _t('ما بنقدر نستخدم هالصورة', "We can't use that photo"),
         'audio_unclear' => _t('ما سمعت منيح، جرّب مرة ثانية', "I couldn't hear that clearly, try again"),
         'audio_too_long' => _t('الرسالة الصوتية أطول من دقيقة، سجّل أقصر', 'Voice messages can be up to a minute'),
@@ -102,13 +102,13 @@ class SunonoCopy {
   /// Under the composer's preview: [error] for the codes a photo can fail
   /// with, a photo-specific line for anything else.
   String photoError(String code) => switch (code) {
+        'customer_blocked' => _t('ما بنقدر نستقبل صور هلّق', "We can't accept photos right now"),
         'rate_limited' ||
         'offline' ||
         'image_too_large' ||
         'invalid_image' ||
         'image_blocked' ||
-        'image_unavailable' ||
-        'customer_blocked' =>
+        'image_unavailable' =>
           error(code),
         _ => _t('ما قدرنا نرفع الصورة', "We couldn't upload that photo"),
       };

@@ -141,7 +141,7 @@ Pass `voiceRecorder` to `Sunono.init` to show the mic (it takes the send button'
 - **Caps.** A note auto-sends at 60 s. Under 1 s it is discarded. Over 1.5 MB it is refused before uploading. Record AAC in m4a, mono, at 64 kbps or less: a full minute is then about 0.5 MB.
 - **Transcript.** The server transcribes the note on upload. The shopper's bubble shows «سمعناك: …» / "We heard: …", so they see what the assistant will act on.
 - **Playback.** Pass `audioPlayer` to put a play button on voice bubbles: the note just recorded plays from its bytes, a restored one from its URL (mp3).
-- **Lifecycle.** A recording is thrown away (`cancel()`) when the app goes to the background, on `Sunono.reset()` and on dispose.
+- **Lifecycle.** A recording is thrown away (`cancel()`) and playback stops when the shopper leaves the chat (route popped or covered, tab hidden), when the app goes to the background, on `Sunono.reset()`, the kill switch and dispose.
 - **Permissions.** `start()` asks for the microphone; return `false` when it is denied. Pass `onOpenSettings` to offer a Settings button with the "allow the microphone" hint. Add the permission strings: iOS `NSMicrophoneUsageDescription` in `Info.plist`, Android `<uses-permission android:name="android.permission.RECORD_AUDIO"/>`.
 
 A host implementation with [`record`](https://pub.dev/packages/record), [`just_audio`](https://pub.dev/packages/just_audio) and [`path_provider`](https://pub.dev/packages/path_provider):
@@ -220,13 +220,13 @@ class JustAudioPlayer implements SunonoAudioPlayer {
 
   @override
   Stream<bool> get playing =>
-      _player.playerStateStream.map((s) => s.playing && s.processingState != ProcessingState.completed);
+      _player.playerStateStream.map((s) => s.playing && s.processingState != ProcessingState.completed).distinct();
 }
 
 // Sunono.init(..., voiceRecorder: RecordVoice(), audioPlayer: JustAudioPlayer(), onOpenSettings: openAppSettings); // e.g. from permission_handler
 ```
 
-Errors show in the shopper's language: not understood (`audio_unclear`), too long or too large, voice notes busy for now (`voice_busy`), voice notes unavailable (`audio_unavailable`, `voice_unavailable`; the latter also hides the mic until the app restarts), offline and rate limited. Retry only appears where it can help, because every upload is a paid transcription. Headless: `controller.startVoice()`, `stopVoice()` (sends), `cancelVoice()`, `controller.voice` (`VoiceIdle | VoiceRecording | VoiceUploading | VoiceFailed`), `toggleVoicePlayback(message)` and `playingVoice`.
+Errors show in the shopper's language: not understood (`audio_unclear`), too long or too large, voice notes busy for now (`voice_busy`), voice notes unavailable (`audio_unavailable`, `voice_unavailable`; the latter also hides the mic for this session, until `Sunono.init` runs again), offline and rate limited. Retry only appears where it can help, because every upload is a paid transcription. Headless: `controller.startVoice()`, `stopVoice()` (sends), `cancelVoice()`, `controller.voice` (`VoiceIdle | VoiceRecording | VoiceUploading | VoiceFailed`), `toggleVoicePlayback(message)` and `playingVoice`.
 
 ## Data collected and privacy
 

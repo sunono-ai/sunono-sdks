@@ -357,6 +357,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   final _playingVoice = ValueNotifier<String?>(null);
   StreamSubscription<bool>? _playingSub;
 
+  /// The current note has reported playing: only a later false ends it (a
+  /// player may report false while the source loads).
+  bool _sawPlaying = false;
+
   List<ChatMessage> get messages => List.unmodifiable(_messages);
 
   /// [m] is the shopper bubble whose turn is in flight (thinking or recovering).
@@ -450,7 +454,12 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       _visible.add(view);
       if (!_disposed) _unread.value = 0;
     } else {
-      _visible.remove(view);
+      // The last view left (popped, covered, a hidden tab): the mic never
+      // keeps recording, nor a note keeps playing, off screen.
+      if (_visible.remove(view) && _visible.isEmpty) {
+        cancelVoice();
+        unawaited(stopVoicePlayback());
+      }
     }
   }
 
@@ -551,6 +560,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _disabledReason = reason;
     _live.stop();
     cancelVoice();
+    unawaited(stopVoicePlayback());
     _changed();
   }
 
@@ -932,7 +942,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   bool get voiceAvailable => voiceRecorder != null && !_voiceOff;
 
   /// Whether the mic can start now: voice available, a ready chat, no turn running.
-  bool get canRecord => voiceAvailable && !_busy && _status == ChatStatus.ready && !updateRequired;
+  bool get canRecord =>
+      voiceAvailable && !_busy && _voice.value is! VoiceUploading && _status == ChatStatus.ready && !updateRequired;
 
   /// Tap-to-record: ask the host recorder to start. A refusal shows as
   /// [VoiceFailed] `mic_denied`. The note auto-sends at 60 s.
@@ -1026,7 +1037,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// (upload = transcription, then `/chat/stream` with the `audio_ref`).
   Future<void> stopVoice() async {
     if (_voice.value is! VoiceRecording || _voiceStarting) return;
-    final rec = voiceRecorder!;
+    final rec = voiceRecorder!, epoch = _epoch;
     _endRecording();
     final gen = _voiceGen;
     _voice.value = const VoiceUploading(0);
@@ -1036,7 +1047,11 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e, s) {
       _emit(ErrorEvent(e, s));
     }
-    if (gen != _voiceGen || _disposed) return; // reset meanwhile
+    if (_disposed) return;
+    if (gen != _voiceGen || epoch != _epoch) {
+      _voice.value = const VoiceIdle(); // reset meanwhile: the old shopper's note is dropped
+      return;
+    }
     if (_busy || _status != ChatStatus.ready || updateRequired) {
       _voice.value = const VoiceIdle();
       return;
@@ -1065,8 +1080,15 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     if (player == null || !m.isVoice) return;
     if (_playingVoice.value == m.id) return stopVoicePlayback();
     _playingSub ??= player.playing.listen((on) {
-      if (!on && !_disposed) _playingVoice.value = null;
+      if (_disposed || _playingVoice.value == null) return;
+      if (on) {
+        _sawPlaying = true;
+      } else if (_sawPlaying) {
+        _sawPlaying = false;
+        _playingVoice.value = null;
+      }
     }, onError: (Object e, StackTrace s) => _emit(ErrorEvent(e, s)));
+    _sawPlaying = false;
     _playingVoice.value = m.id;
     try {
       await player.play(bytes: m.localAudio, url: m.localAudio == null ? m.audioUrl : null);
@@ -1181,12 +1203,13 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// no HTTP response is retried by itself (once); any refusal, including a
   /// stream's 400 for an expired ref, waits for the shopper's Retry.
   Future<TurnResult> _voiceTurn(_Outgoing out, ChatMessage bot, int gen) async {
-    final at = out.audioReadyAt;
+    final at = out.audioReadyAt, epoch = _epoch;
     if (out.audioRef == null || at == null || _clock().difference(at) > _imageRefMaxAge) {
       try {
         await _uploadVoice(out, gen);
       } on _NoResponse {
-        if (gen != _session.generation) rethrow; // aborted by a reset
+        // Aborted by a reset or dispose: never a second paid upload.
+        if (gen != _session.generation || epoch != _epoch || _disposed) rethrow;
         try {
           await _uploadVoice(out, gen);
         } on _NoResponse {
@@ -1207,6 +1230,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     final audio = out.audio!, epoch = _epoch;
     final abort = _abortVoice = Completer<void>();
     bool current() => epoch == _epoch && !_disposed;
+    if (!current()) throw StateError('superseded');
     _voice.value = const VoiceUploading(0);
     try {
       final r = await _session.authed(
@@ -1214,7 +1238,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
           (t) => _api.uploadAudio(t, audio.bytes, mimeType: audio.mimeType, abort: abort.future, onProgress: (p) {
                 if (current()) _voice.value = VoiceUploading(p);
               }));
-      if (!current()) return;
+      if (!current()) throw StateError('superseded'); // never stream without the ref
       out
         ..audioRef = r.ref
         ..audioReadyAt = _clock();
@@ -1384,8 +1408,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         role: switch (r.role) { 'user' => ChatRole.user, 'staff' => ChatRole.staff, _ => ChatRole.bot },
         text: r.text,
         imageUrl: r.imageUrl,
-        audioUrl: r.audio?.url,
-        audioDuration: r.audio?.durationMs == null ? null : Duration(milliseconds: r.audio!.durationMs!),
+        audioUrl: r.role == 'user' ? _playableUrl(r.audio?.url) : null,
+        audioDuration:
+            r.role != 'user' || r.audio?.durationMs == null ? null : Duration(milliseconds: r.audio!.durationMs!),
         products: r.products,
         hasMore: r.hasMore,
         checkout: r.checkout,
@@ -1396,6 +1421,14 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         ts: r.ts,
         delivered: true,
       );
+
+  /// A voice note's URL the player may open: https (plain http only against
+  /// a local http API, as [SunonoApi] allows).
+  String? _playableUrl(String? url) {
+    final u = url == null ? null : Uri.tryParse(url);
+    if (u == null || u.host.isEmpty) return null;
+    return u.scheme == 'https' || (u.scheme == 'http' && Uri.parse(_api.apiBase).scheme == 'http') ? url : null;
+  }
 
   /// History user rows this screen doesn't account for. A user row is
   /// accounted for when its own msg_ref is on screen, or when the reply right
