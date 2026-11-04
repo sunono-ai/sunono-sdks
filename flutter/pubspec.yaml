@@ -1,9 +1,9 @@
 name: sunono
 description: >-
   Sunono AI shopping assistant for Flutter apps: a ready chat screen that
-  searches the catalog, manages the cart, checks out and hands navigation back
-  to your app. Pure Dart, no native code.
-version: 0.2.0
+  searches the catalog, fills the cart, takes voice notes and hands checkout
+  back to your app. Pure Dart.
+version: 0.3.0
 homepage: https://sunono.ai
 repository: https://github.com/sunono-ai/sunono-sdks/tree/main/flutter
 issue_tracker: https://github.com/sunono-ai/sunono-sdks/issues

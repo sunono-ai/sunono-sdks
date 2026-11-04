@@ -15,8 +15,41 @@ import 'sse.dart';
 /// The server refuses larger photos (`413 image_too_large`).
 const _maxPhotoBytes = 5 * 1024 * 1024;
 
-/// The server signs an `image_ref` for about an hour; refresh before that.
+/// The server signs an `image_ref` / `audio_ref` for about an hour; refresh before that.
 const _imageRefMaxAge = Duration(minutes: 55);
+
+/// The server's voice-note caps (`audio_too_large`, `audio_too_long`; it
+/// allows 0.5 s of encoder padding over the minute). Checked before uploading:
+/// every upload is a paid transcription.
+const _maxVoiceBytes = 1536 * 1024;
+const _maxVoice = Duration(seconds: 60);
+const _voiceGrace = Duration(milliseconds: 500);
+const _minVoice = Duration(seconds: 1);
+
+/// A voice note the same bytes can never fix: retrying would only pay for
+/// the same refusal. The shopper records again or types.
+const _voiceFinal = {
+  'audio_too_large',
+  'audio_too_long',
+  'audio_unclear',
+  'invalid_audio',
+  'audio_unavailable',
+  'voice_busy',
+  'voice_unavailable',
+  'customer_blocked'
+};
+
+/// The upload got no HTTP response (offline, reset, timeout).
+class _NoResponse implements Exception {
+  const _NoResponse(this.error);
+  final Object error;
+}
+
+/// The voice upload was refused or failed: no turn ran, show [code].
+class _VoiceRefused implements Exception {
+  const _VoiceRefused(this.code);
+  final String code;
+}
 
 /// JPEG, PNG or WebP by magic bytes (the filename and the host's word don't count).
 bool _isSupportedImage(List<int> b) {
@@ -57,10 +90,14 @@ class ChatMessage {
     this.text = '',
     this.imageUrl,
     this.localImage,
+    this.audioUrl,
+    this.localAudio,
+    this.audioDuration,
     this.products = const [],
     this.hasMore = false,
     this.checkout,
-    this.handoffUrl,
+    CheckoutHandoff? handoff,
+    @Deprecated("Use handoff: (url: …, target: 'checkout'). Removed in 1.0.") String? handoffUrl,
     this.orderIds,
     this.msgRef,
     this.clientRef,
@@ -69,17 +106,34 @@ class ChatMessage {
     this.stage,
     this.replyLang,
     this.errorCode,
-  }) : ts = ts ?? DateTime.now();
+    this.delivered = false,
+  })  : ts = ts ?? DateTime.now(),
+        handoff = handoff ?? (handoffUrl == null ? null : (url: handoffUrl, target: 'checkout'));
 
   final String id;
   final ChatRole role;
   String text;
   String? imageUrl;
   Uint8List? localImage;
+
+  /// A voice note (the shopper's): [audioUrl] when restored from history,
+  /// [localAudio] when just recorded. [text] is its transcript (empty until
+  /// the upload returns it).
+  String? audioUrl;
+  Uint8List? localAudio;
+  Duration? audioDuration;
+
+  /// A voice note bubble.
+  bool get isVoice => audioUrl != null || localAudio != null;
   List<ProductCard> products;
   bool hasMore;
   Checkout? checkout;
-  String? handoffUrl;
+
+  /// Where "Complete order" goes: the host cart (`target: 'cart'`) or the site checkout.
+  CheckoutHandoff? handoff;
+
+  /// The site checkout URL of [handoff], if any.
+  String? get handoffUrl => handoff?.url;
 
   /// Ids of the order this reply is about (placed, or its status).
   OrderIds? orderIds;
@@ -95,13 +149,22 @@ class ChatMessage {
   /// Why a send failed (`image_too_large`, `rate_limited`, `offline`, …).
   String? errorCode;
 
+  /// A shopper bubble the server has: its turn returned, or a history row
+  /// matched it. Restored rows are delivered.
+  bool delivered;
+
   /// For a retry: what was sent.
   _Outgoing? _outgoing;
+
+  /// A failed send the shopper can retry. A voice note refused for what it
+  /// is (unclear, too long, …) is not: the same bytes would fail again.
+  bool get retryable => _outgoing != null && !(_outgoing!.audio != null && _voiceFinal.contains(errorCode));
 }
 
 class _Outgoing {
   _Outgoing(this.text, this.synthetic, this.image, this.imageRef, this.imageReadyAt, this.productId, this.productSku,
-      this.tap, this.user);
+      this.tap, this.user,
+      {this.audio});
 
   /// Minted once per message and reused by every retry, so the server can
   /// answer a repeat with the stored reply instead of running the turn twice.
@@ -122,6 +185,18 @@ class _Outgoing {
 
   /// The shopper's bubble for this send.
   final ChatMessage user;
+
+  /// A voice note: uploaded (and transcribed) when the turn runs; [audioRef]
+  /// is reused by a retry while fresh. [text] is then empty.
+  final SunonoAudio? audio;
+  String? audioRef;
+  DateTime? audioReadyAt;
+
+  /// The media turn path (`/chat/stream`).
+  bool get media => imageRef != null || audio != null;
+
+  /// What the shopper's history row reads: a voice note's transcript.
+  String get rowText => audio != null ? user.text : text;
 }
 
 /// The chat state machine. UI-free: a host can drive its own UI from it.
@@ -141,6 +216,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     this.nativeCheckout = false,
     this.onIntent,
     this.starterPrompts,
+    this.quickReplies,
+    this.voiceRecorder,
+    this.audioPlayer,
+    this.onOpenSettings,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
     DateTime Function() clock = DateTime.now,
   })  : _api = api,
@@ -172,9 +251,25 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// Returns true when the host handled the intent.
   bool Function(SunonoIntent intent)? onIntent;
 
-  /// Host override of the empty-thread starter chips, by language (`ar` / `en`).
-  /// A language that is missing uses the SDK defaults; an empty list shows none.
+  /// Deprecated: use [quickReplies]. Text-only chips on the empty thread only
+  /// (as in 0.2), by language (`ar` / `en`), when [quickReplies] has none for
+  /// that language.
   final Map<String, List<String>>? starterPrompts;
+
+  /// The chips under the latest reply and on an empty thread, by language
+  /// (`ar` / `en`), at most 3. A missing language uses the SDK defaults
+  /// ("Browse offers", "Talk to our team"); `[]` shows none.
+  final Map<String, List<SunonoQuickReply>>? quickReplies;
+
+  /// The host's microphone; null hides the mic.
+  final SunonoVoiceRecorder? voiceRecorder;
+
+  /// Plays voice bubbles; null shows them without a play button.
+  final SunonoAudioPlayer? audioPlayer;
+
+  /// Opens the app's settings (the microphone permission), offered with the
+  /// "allow the microphone" hint when set.
+  final VoidCallback? onOpenSettings;
 
   /// Delays between history checks while recovering (cumulative waits).
   final List<Duration> recoveryChecks;
@@ -213,6 +308,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   bool _bound = false;
   bool _ensureTried = false;
 
+  /// The last bind gave no link (no proof, refused, error) or the server
+  /// refused an add as unlinked. Cleared by a link or a re-bind.
+  bool _bindFailed = false;
+
   /// Cart write ordering. Every pull or history fetch takes a ticket
   /// (`++_cartReq`) when it STARTS; a turn or live write takes the next one
   /// when applied. A response applies only if its ticket is newer than the last
@@ -241,8 +340,31 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   SunonoImage? _photoImage;
   int _photoGen = 0;
   Completer<void>? _abortUpload;
+  final _voice = ValueNotifier<VoiceState>(const VoiceIdle());
+
+  /// Bumped by every start/stop/cancel/reset: a late recorder answer for an
+  /// older recording is dropped.
+  int _voiceGen = 0;
+  bool _voiceStarting = false;
+
+  /// A `503 voice_unavailable`: the shop has voice off.
+  bool _voiceOff = false;
+  DateTime? _voiceAt;
+  final List<double> _voiceLevels = [];
+  StreamSubscription<double>? _levelSub;
+  Timer? _voiceTick;
+  Completer<void>? _abortVoice;
+  final _playingVoice = ValueNotifier<String?>(null);
+  StreamSubscription<bool>? _playingSub;
+
+  /// The current note has reported playing: only a later false ends it (a
+  /// player may report false while the source loads).
+  bool _sawPlaying = false;
 
   List<ChatMessage> get messages => List.unmodifiable(_messages);
+
+  /// [m] is the shopper bubble whose turn is in flight (thinking or recovering).
+  bool isSending(ChatMessage m) => identical(_running?.user, m);
   String get lang => _lang;
   ChatStatus get status => _status;
   ShopConfig get config => _config;
@@ -266,6 +388,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// A turn is in flight; the composer should not send.
   bool get busy => _busy;
+
+  /// Card Add opens the product page instead of asking the bot: the bot
+  /// adds only to a linked storefront cart, and none is linked or linkable.
+  bool get addOpensProduct => !_bound && (cartBridge == null || _bindFailed);
 
   /// The card (`public_id`) whose Add started the running turn, if any.
   String? get addingRef => _busy && _running?.tap?.action == 'add_to_cart' ? _running!.tap!.ref : null;
@@ -328,7 +454,12 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       _visible.add(view);
       if (!_disposed) _unread.value = 0;
     } else {
-      _visible.remove(view);
+      // The last view left (popped, covered, a hidden tab): the mic never
+      // keeps recording, nor a note keeps playing, off screen.
+      if (_visible.remove(view) && _visible.isEmpty) {
+        cancelVoice();
+        unawaited(stopVoicePlayback());
+      }
     }
   }
 
@@ -414,8 +545,13 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _goLive(); // fetches history first
   }
 
-  /// App went to background: drop the live connection.
-  void suspend() => _live.stop();
+  /// App went to background: drop the live connection; a recording is
+  /// thrown away and playback stops.
+  void suspend() {
+    _live.stop();
+    cancelVoice();
+    stopVoicePlayback();
+  }
 
   /// The kill switch (config or a `403 platform_disabled`): stop everything.
   void _disable(String? reason) {
@@ -423,6 +559,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _status = ChatStatus.disabled;
     _disabledReason = reason;
     _live.stop();
+    cancelVoice();
+    unawaited(stopVoicePlayback());
     _changed();
   }
 
@@ -485,6 +623,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> reset() async {
     _epoch++;
     removePhoto();
+    cancelVoice();
+    _abortVoice?.complete();
+    _abortVoice = null;
+    stopVoicePlayback();
     _live.stop();
     final wasOpen = _status != ChatStatus.idle; // loading and disabled re-open too
     final oldId = _session.userId, oldToken = _session.currentToken;
@@ -581,6 +723,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _linkGen++;
     _bound = false;
     _ensureTried = false;
+    _bindFailed = false;
   }
 
   /// Follow the server's word on the link. A link that drops re-arms the
@@ -591,6 +734,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     if (linked && gen != _linkGen) return;
     if (!linked && _bound) _ensureTried = false;
     _bound = linked;
+    if (linked) _bindFailed = false;
   }
 
   /// A turn or live push wrote the cart: it is newer than any request in flight.
@@ -637,11 +781,19 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final uid = await _session.ensureUserId();
       final proof = ensure ? await bridge.ensureBind(uid) : await bridge.probe(uid);
-      if (proof == null || epoch != _epoch) return;
+      if (epoch != _epoch) return;
+      // Only a failed ensure counts: a probe with nothing to bind still lets the next send ensure.
+      if (proof == null) {
+        _bindFailed |= ensure;
+        return;
+      }
       final bound = await _api.bindCart(uid, proof);
-      if (epoch == _epoch) _setBound(bound, gen);
+      if (epoch != _epoch) return;
+      _setBound(bound, gen);
+      if (!bound) _bindFailed |= ensure;
     } catch (e, s) {
       if (epoch != _epoch) return; // a reset is not an error
+      _bindFailed |= ensure;
       if (e is SunonoHttpException && e.isPlatformDisabled) _disable('platform_disabled');
       _emit(ErrorEvent(e, s)); // never loops: next open/resume/refresh tries again
     }
@@ -653,8 +805,14 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _epoch++;
     _photoGen++;
     _abortUpload?.complete();
+    cancelVoice();
+    _abortVoice?.complete();
+    stopVoicePlayback();
+    unawaited(_playingSub?.cancel());
     if (_observing) WidgetsBinding.instance.removeObserver(this);
     _photo.dispose();
+    _voice.dispose();
+    _playingVoice.dispose();
     _unread.dispose();
     _cartCount.dispose();
     _live.stop();
@@ -680,7 +838,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       ({String action, String ref})? tap,
       bool withPhoto = true}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || _busy || _status != ChatStatus.ready || updateRequired) return;
+    if (trimmed.isEmpty || _busy || _status != ChatStatus.ready || updateRequired || _recordingOrStarting) return;
+    if (_voice.value is VoiceFailed) _voice.value = const VoiceIdle();
     final state = _photo.value;
     final typed = !synthetic && tap == null && withPhoto;
     if (typed && (state is PhotoUploading || (state is PhotoFailed && state.retryable))) return;
@@ -765,10 +924,209 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  // ------------------------------------------------------------------ voice
+
+  /// The voice note: idle, recording, uploading or failed (before sending).
+  ValueListenable<VoiceState> get voice => _voice;
+
+  /// The id of the voice bubble playing now (needs [audioPlayer]).
+  ValueListenable<String?> get playingVoice => _playingVoice;
+
+  bool get _recordingOrStarting => _voiceStarting || _voice.value is VoiceRecording;
+
+  /// A voice note is being recorded (or the mic is starting): sends wait.
+  bool get recording => _recordingOrStarting;
+
+  /// Voice notes are offered: a recorder, and the shop hasn't answered
+  /// `voice_unavailable` (then the mic hides for this controller's life).
+  bool get voiceAvailable => voiceRecorder != null && !_voiceOff;
+
+  /// Whether the mic can start now: voice available, a ready chat, no turn running.
+  bool get canRecord =>
+      voiceAvailable && !_busy && _voice.value is! VoiceUploading && _status == ChatStatus.ready && !updateRequired;
+
+  /// Tap-to-record: ask the host recorder to start. A refusal shows as
+  /// [VoiceFailed] `mic_denied`. The note auto-sends at 60 s.
+  Future<void> startVoice() async {
+    final rec = voiceRecorder;
+    if (rec == null || !canRecord || _recordingOrStarting) return;
+    final gen = ++_voiceGen;
+    _voiceStarting = true;
+    _voice.value = const VoiceIdle();
+    var ok = false;
+    try {
+      ok = await rec.start();
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s));
+      if (gen == _voiceGen && !_disposed) {
+        _voiceStarting = false;
+        _voice.value = const VoiceFailed('voice_failed');
+      }
+      return;
+    }
+    if (gen != _voiceGen || _disposed) {
+      if (ok) _cancelRecorder(rec); // reset, pause or cancel during the permission prompt
+      return;
+    }
+    _voiceStarting = false;
+    if (!ok) {
+      _voice.value = const VoiceFailed('mic_denied');
+      return;
+    }
+    _voiceAt = _clock();
+    _voiceLevels.clear();
+    try {
+      _levelSub = rec.levels.listen((l) {
+        if (gen != _voiceGen) return;
+        _voiceLevels.add(l.isNaN ? 0 : l.clamp(0, 1).toDouble());
+        if (_voiceLevels.length > 12) _voiceLevels.removeAt(0);
+        _tickVoice();
+      }, onError: (Object e, StackTrace s) => _emit(ErrorEvent(e, s)));
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s)); // no levels: flat bars
+    }
+    _voiceTick = Timer.periodic(const Duration(milliseconds: 100), (_) => _tickVoice());
+    _tickVoice();
+    _changed(); // chips and menu sends pause while recording
+  }
+
+  void _tickVoice() {
+    final at = _voiceAt;
+    if (at == null || _disposed) return;
+    final elapsed = _clock().difference(at);
+    if (elapsed >= _maxVoice) {
+      unawaited(stopVoice()); // the cap: send what we have
+      return;
+    }
+    _voice.value = VoiceRecording(elapsed, _voiceLevels.lastOrNull ?? 0, List.unmodifiable(_voiceLevels));
+  }
+
+  void _endRecording() {
+    _voiceGen++;
+    _voiceStarting = false;
+    _voiceAt = null;
+    _voiceTick?.cancel();
+    _voiceTick = null;
+    final sub = _levelSub;
+    _levelSub = null;
+    if (sub != null) unawaited(sub.cancel().catchError((Object _) {}));
+    _changed();
+  }
+
+  /// Never leaves an error unhandled: the recorder is the host's code.
+  void _cancelRecorder(SunonoVoiceRecorder rec) {
+    try {
+      unawaited(rec.cancel().catchError((Object e, StackTrace s) => _emit(ErrorEvent(e, s))));
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s));
+    }
+  }
+
+  /// Throw the recording away (✕, app pause, reset, dispose). Nothing is sent.
+  void cancelVoice() {
+    if (!_recordingOrStarting) return;
+    final starting = _voiceStarting;
+    _endRecording();
+    if (!_disposed) _voice.value = const VoiceIdle();
+    // A start still asking for permission is cancelled when it answers.
+    if (!starting) _cancelRecorder(voiceRecorder!);
+  }
+
+  /// Stop recording and send the note: under 1 s it is discarded, over the
+  /// caps it never uploads; else a voice bubble appears and the turn runs
+  /// (upload = transcription, then `/chat/stream` with the `audio_ref`).
+  /// How long the host recorder may take to hand back the note.
+  @visibleForTesting
+  static Duration recorderStopTimeout = const Duration(seconds: 10);
+
+  Future<void> stopVoice() async {
+    if (_voice.value is! VoiceRecording || _voiceStarting) return;
+    final rec = voiceRecorder!, epoch = _epoch;
+    _endRecording();
+    final gen = _voiceGen;
+    _voice.value = const VoiceUploading(0);
+    SunonoAudio? audio;
+    try {
+      audio = await rec.stop().timeout(recorderStopTimeout);
+    } on TimeoutException {
+      // A hung recorder must not leave the mic stuck on "uploading".
+      unawaited(rec.cancel().then<void>((_) {}, onError: (_) {}));
+      if (!_disposed && gen == _voiceGen && epoch == _epoch) _voice.value = const VoiceFailed('voice_failed');
+      return;
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s));
+    }
+    if (_disposed) return;
+    if (gen != _voiceGen || epoch != _epoch) {
+      // Reset meanwhile: the old shopper's note is dropped. Don't clobber a
+      // recording the new shopper has started since.
+      if (_voice.value is VoiceUploading) _voice.value = const VoiceIdle();
+      return;
+    }
+    if (_busy || _status != ChatStatus.ready || updateRequired) {
+      _voice.value = const VoiceIdle();
+      return;
+    }
+    final code = audio == null || audio.duration < _minVoice
+        ? 'voice_too_short'
+        : audio.bytes.length > _maxVoiceBytes
+            ? 'audio_too_large'
+            : audio.duration > _maxVoice + _voiceGrace
+                ? 'audio_too_long'
+                : null;
+    if (code != null) {
+      _voice.value = VoiceFailed(code);
+      return;
+    }
+    _voice.value = const VoiceIdle();
+    final user = ChatMessage(id: _id(), role: ChatRole.user, localAudio: audio!.bytes, audioDuration: audio.duration);
+    _messages.add(user);
+    _emit(const AnalyticsEvent('assistant_message_sent', {'synthetic': false, 'photo': false, 'voice': true}));
+    await _run(_Outgoing('', false, null, null, null, null, null, null, user, audio: audio));
+  }
+
+  /// Play [m]'s voice note, or stop it when it is the one playing.
+  Future<void> toggleVoicePlayback(ChatMessage m) async {
+    final player = audioPlayer;
+    if (player == null || !m.isVoice) return;
+    if (_playingVoice.value == m.id) return stopVoicePlayback();
+    _playingSub ??= player.playing.listen((on) {
+      if (_disposed || _playingVoice.value == null) return;
+      if (on) {
+        _sawPlaying = true;
+      } else if (_sawPlaying) {
+        _sawPlaying = false;
+        _playingVoice.value = null;
+      }
+    }, onError: (Object e, StackTrace s) => _emit(ErrorEvent(e, s)));
+    _sawPlaying = false;
+    _playingVoice.value = m.id;
+    try {
+      await player.play(bytes: m.localAudio, url: m.localAudio == null ? m.audioUrl : null);
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s));
+      if (!_disposed && _playingVoice.value == m.id) _playingVoice.value = null;
+    }
+  }
+
+  /// Stop any voice note playing.
+  Future<void> stopVoicePlayback() async {
+    final player = audioPlayer;
+    if (player == null || _playingVoice.value == null) return;
+    if (!_disposed) _playingVoice.value = null;
+    try {
+      await player.stop();
+    } catch (e, s) {
+      _emit(ErrorEvent(e, s));
+    }
+  }
+
   /// Retry a failed bot bubble's turn.
   Future<void> retry(ChatMessage failed) async {
     final out = failed._outgoing;
-    if (out == null || _busy || !_messages.contains(failed) || !_messages.contains(out.user)) return;
+    if (out == null || _busy || _recordingOrStarting || !_messages.contains(failed) || !_messages.contains(out.user)) {
+      return;
+    }
     _messages.remove(failed);
     await _run(out);
   }
@@ -788,7 +1146,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         _ensureTried = true;
         await _bind(ensure: true);
       }
-      final result = out.imageRef == null
+      final result = !out.media
           ? await _session.authed(
               (t) => _api.chat(t, out.text,
                   lang: _lang,
@@ -798,8 +1156,12 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
                   tap: out.tap,
                   clientMessageId: out.clientMessageId),
               gen: gen)
-          : await _photoTurn(out, bot, gen);
+          : out.audio != null
+              ? await _voiceTurn(out, bot, gen)
+              : await _photoTurn(out, bot, gen);
       if (epoch == _epoch) _apply(bot, result);
+    } on _VoiceRefused catch (e) {
+      if (epoch == _epoch) _fail(bot, e.code); // no turn ran
     } on SunonoHttpException catch (e) {
       if (epoch != _epoch) return;
       if (e.isPlatformDisabled) {
@@ -847,6 +1209,77 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     out.imageReadyAt = _clock();
   }
 
+  /// Upload (= transcribe) the note unless a fresh ref is in hand, then
+  /// stream the turn. Uploads are paid and not idempotent: only a connect/socket failure
+  /// (nothing was sent) is retried by itself (once); any refusal, including a
+  /// stream's 400 for an expired ref, waits for the shopper's Retry. A timeout
+  /// is not "no response": the server may already have transcribed the note.
+  Future<TurnResult> _voiceTurn(_Outgoing out, ChatMessage bot, int gen) async {
+    final at = out.audioReadyAt, epoch = _epoch;
+    if (out.audioRef == null || at == null || _clock().difference(at) > _imageRefMaxAge) {
+      try {
+        await _uploadVoice(out, gen);
+      } on _NoResponse {
+        // Aborted by a reset or dispose: never a second paid upload.
+        if (gen != _session.generation || epoch != _epoch || _disposed) rethrow;
+        try {
+          await _uploadVoice(out, gen);
+        } on _NoResponse {
+          throw const _VoiceRefused('offline'); // no turn ran: the shopper retries
+        }
+      }
+    }
+    try {
+      return await _photoStream(out, bot, gen);
+    } on SunonoHttpException catch (e) {
+      if (e.status != 400) rethrow;
+      out.audioRef = null; // expired or unknown: a Retry uploads again
+      throw _VoiceRefused(e.code ?? 'http_400');
+    }
+  }
+
+  Future<void> _uploadVoice(_Outgoing out, int gen) async {
+    final audio = out.audio!, epoch = _epoch;
+    final abort = _abortVoice = Completer<void>();
+    bool current() => epoch == _epoch && !_disposed;
+    if (!current()) throw StateError('superseded');
+    _voice.value = const VoiceUploading(0);
+    try {
+      final r = await _session.authed(
+          gen: gen,
+          (t) => _api.uploadAudio(t, audio.bytes, mimeType: audio.mimeType, abort: abort.future, onProgress: (p) {
+                if (current()) _voice.value = VoiceUploading(p);
+              }));
+      if (!current()) throw StateError('superseded'); // never stream without the ref
+      out
+        ..audioRef = r.ref
+        ..audioReadyAt = _clock();
+      out.user
+        ..text = r.transcript
+        ..audioDuration = r.durationMs == null ? out.user.audioDuration : Duration(milliseconds: r.durationMs!);
+      _changed();
+    } on SunonoHttpException catch (e) {
+      if (e.isPlatformDisabled) rethrow; // the session switched the chat off
+      // The shop turned voice off: no mic for the rest of this controller's life.
+      if (e.code == 'voice_unavailable') _voiceOff = true;
+      throw _VoiceRefused(switch (e.status) {
+        429 when e.code == 'voice_busy' => 'voice_busy',
+        429 => 'rate_limited',
+        _ => e.code ?? 'http_${e.status}'
+      });
+    } on StateError {
+      rethrow; // the shopper changed (reset): nothing to show
+    } catch (e, s) {
+      if (current()) _emit(ErrorEvent(e, s));
+      // Timed out after the send began: the paid upload may have run. Shopper's Retry decides.
+      if (e is TimeoutException) throw const _VoiceRefused('offline');
+      throw _NoResponse(e);
+    } finally {
+      if (identical(_abortVoice, abort)) _abortVoice = null;
+      if (current()) _voice.value = const VoiceIdle();
+    }
+  }
+
   Future<TurnResult> _photoStream(_Outgoing out, ChatMessage bot, int gen) {
     return _session.authed(gen: gen, (t) async {
       TurnResult? done;
@@ -857,6 +1290,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
           productSku: out.productSku,
           tap: out.tap,
           imageRef: out.imageRef,
+          audioRef: out.audioRef,
           clientMessageId: out.clientMessageId)) {
         final j = f.json;
         if (j == null) continue;
@@ -883,6 +1317,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _apply(ChatMessage bot, TurnResult r) {
+    bot._outgoing?.user.delivered = true;
     if (r.typingHint != null) _typingHint = r.typingHint!;
     // ponytail: turn vs live cart order has no server version; a late turn snapshot can overwrite a newer live one - needs a server cart version
     if (r.cartPresent || r.cartMutated) _cartWritten();
@@ -891,7 +1326,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     } else if (r.cartMutated) {
       _emit(CartChangedEvent(_cart, fromSync: true));
     }
-    if (r.relink) _unbind(); // the server dropped the link: ensure again next send
+    if (r.relink || r.cartUnlinked) _unbind(); // the server dropped the link: ensure again next send
+    if (r.cartUnlinked) _bindFailed = true; // until then Add opens the product
     if (r.silent && r.checkout == null && r.products.isEmpty) {
       _messages.remove(bot); // paused / blocked / silenced: say nothing
       return;
@@ -904,7 +1340,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       ..products = r.products
       ..hasMore = r.hasMore
       ..checkout = r.checkout
-      ..handoffUrl = r.handoffUrl
+      ..handoff = r.handoff
       ..orderIds = r.orderIds
       ..msgRef = r.msgRef
       ..replyLang = r.replyLang
@@ -960,8 +1396,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       final rows = h.rows;
       final repliedLive = liveRef != null &&
           [for (var i = 0; i + 1 < rows.length; i++) i]
-              .any((i) => rows[i].role == 'user' && rows[i].text == out.text && rows[i + 1].msgRef == liveRef);
-      if (repliedLive || _unknownUserRows(h).any((r) => r.text == out.text)) {
+              .any((i) => rows[i].role == 'user' && rows[i].text == out.rowText && rows[i + 1].msgRef == liveRef);
+      if (repliedLive || _unknownUserRows(h).any((r) => r.text == out.rowText)) {
         // The turn happened: the server's thread is the truth now.
         final pills = _messages.where((m) => m.role == ChatRole.system).toList();
         _messages
@@ -986,12 +1422,27 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         role: switch (r.role) { 'user' => ChatRole.user, 'staff' => ChatRole.staff, _ => ChatRole.bot },
         text: r.text,
         imageUrl: r.imageUrl,
+        audioUrl: r.role == 'user' ? _playableUrl(r.audio?.url) : null,
+        audioDuration:
+            r.role != 'user' || r.audio?.durationMs == null ? null : Duration(milliseconds: r.audio!.durationMs!),
         products: r.products,
         hasMore: r.hasMore,
-        handoffUrl: r.handoffUrl,
+        checkout: r.checkout,
+        handoff: r.handoff,
+        orderIds: r.orderIds,
+        replyLang: r.replyLang,
         msgRef: r.msgRef,
         ts: r.ts,
+        delivered: true,
       );
+
+  /// A voice note's URL the player may open: https (plain http only against
+  /// a local http API, as [SunonoApi] allows).
+  String? _playableUrl(String? url) {
+    final u = url == null ? null : Uri.tryParse(url);
+    if (u == null || u.host.isEmpty) return null;
+    return u.scheme == 'https' || (u.scheme == 'http' && Uri.parse(_api.apiBase).scheme == 'http') ? url : null;
+  }
 
   /// History user rows this screen doesn't account for. A user row is
   /// accounted for when its own msg_ref is on screen, or when the reply right
@@ -1041,7 +1492,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
           final local =
               _messages.where((m) => m.role == ChatRole.user && m.msgRef == null && m.text == r.text).firstOrNull;
           if (local != null) {
-            local.msgRef = r.msgRef ?? '_local_${local.id}';
+            local
+              ..msgRef = r.msgRef ?? '_local_${local.id}'
+              ..delivered = true;
             continue;
           }
         } else if (r.msgRef == null && _sameRecentBubble(r)) {
@@ -1182,10 +1635,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     if (!_hand(intent)) _emit(ErrorEvent(UnhandledIntent(intent)));
   }
 
-  /// View the cart: the host's cart screen while it shares the shopper's
-  /// storefront cart, otherwise (or when the host declines) ask the assistant.
+  /// View the cart: the host's cart screen (the app cart is the shopper's
+  /// truth, linked or not); only when the host declines, ask the assistant.
   Future<void> openCart() async {
-    if (_bound && _hand(const OpenCartIntent())) return;
+    if (_hand(const OpenCartIntent())) return;
     await send(cartPhrase(_lang), synthetic: true);
   }
 
@@ -1203,12 +1656,17 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Whether the host handled it (the sheet may close).
-  bool checkout(String? url) {
+  /// [target] `cart` (app checkout): the host cart page, else (declined)
+  /// its native checkout screen when [nativeCheckout]; never the site [url].
+  bool checkout(String? url, {String target = 'checkout'}) {
     _emit(const AnalyticsEvent('assistant_checkout_tapped'));
-    final intent = CheckoutIntent(url: url);
-    final handled = _hand(intent);
+    final cart = target == 'cart';
+    final SunonoIntent intent = cart ? const OpenCartIntent() : CheckoutIntent(url: url);
+    final handled = _hand(intent) || (cart && nativeCheckout && _hand(const CheckoutIntent()));
     if (!handled) _emit(ErrorEvent(UnhandledIntent(intent)));
-    _unbind(); // the order completes on the storefront and rotates its cart
+    // A site checkout completes on the storefront and rotates its cart; opening
+    // the host cart keeps the link (the host calls refreshCartBinding after an order).
+    if (!cart) _unbind();
     return handled;
   }
 

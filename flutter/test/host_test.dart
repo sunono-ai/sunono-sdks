@@ -714,9 +714,12 @@ void main() {
       await tester.pumpWidget(app(SunonoChatView(controller: c)));
       await settle(tester);
       String? url(ImageProvider p) => p is ResizeImage ? url(p.imageProvider) : (p as NetworkImage).url;
-      final avatar =
-          tester.widget<Image>(find.byWidgetPredicate((w) => w is Image && url(w.image) == 'https://cdn.test/a.png'));
-      expect(avatar.excludeFromSemantics, isTrue);
+      final avatars = tester
+          .widgetList<Image>(find.byWidgetPredicate((w) => w is Image && url(w.image) == 'https://cdn.test/a.png'))
+          .toList();
+      // The header's (44) and the one beside the welcome bubble (32), both decorative.
+      expect(avatars.map((a) => a.width), [44, 32]);
+      expect(avatars.every((a) => a.excludeFromSemantics), isTrue);
       await finish(tester);
     });
 

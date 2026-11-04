@@ -24,6 +24,7 @@ void main() {
         ),
         storage: MemoryStorage(),
         lang: lang,
+        cartBridge: _Bridge(), // linked on the first send: Add asks the bot
         onIntent: (i) {
           intents.add(i);
           return true;
@@ -157,7 +158,8 @@ void main() {
     server.chatReply = {'reply': 'See https://shop.example/p for more', 'action_data': <String, dynamic>{}};
     await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
     await settle(tester);
-    final send = find.bySemanticsLabel('Send');
+    // An IconButton: its tooltip is what screen readers say.
+    final send = find.byTooltip('Send');
     // isSemantics replaces it from Flutter 3.40; the floor is 3.27.
     // ignore: deprecated_member_use
     expect(tester.getSemantics(send), containsSemantics(isButton: true, hasEnabledState: true, isEnabled: false));
@@ -214,4 +216,11 @@ void main() {
     expect(find.text('كمّل الطلب بالموقع'), findsOneWidget);
     await finish(tester);
   });
+}
+
+class _Bridge implements SunonoCartBridge {
+  @override
+  Future<Map<String, dynamic>?> probe(String userId) async => {'sig': 'p'};
+  @override
+  Future<Map<String, dynamic>?> ensureBind(String userId) async => {'sig': 'e'};
 }

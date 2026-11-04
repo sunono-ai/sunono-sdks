@@ -34,7 +34,11 @@ jobs:
       - if: matrix.flutter-version == 'stable'
         run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
-      - run: flutter test
+      - run: flutter test --exclude-tags golden
+      # Pixel goldens differ across Flutter versions: they run on one pinned leg.
+      # Regenerate with `flutter test --tags golden --update-goldens` on 3.44.
+      - if: matrix.flutter-version == '3.44.x'
+        run: flutter test --tags golden
       - if: matrix.flutter-version == 'stable'
         run: dart pub publish --dry-run
 

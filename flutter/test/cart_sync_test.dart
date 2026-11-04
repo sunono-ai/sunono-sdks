@@ -99,6 +99,40 @@ void main() {
     expect(bridge.ensures, 1);
   });
 
+  group('Add without a linked cart', () {
+    test('a bridge not yet tried: Add asks the bot (the send ensures first)', () async {
+      await c.open();
+      expect(c.addOpensProduct, isFalse);
+    });
+
+    test('ensure gives no proof: Add opens the product until a re-bind links', () async {
+      bridge
+        ..probeProof = null
+        ..ensureProof = null;
+      await c.open();
+      await server.until(() => bridge.probes == 1);
+      expect(c.addOpensProduct, isFalse, reason: 'a probe with nothing to bind is not a failure');
+      await c.send('hi');
+      expect(bridge.ensures, 1);
+      expect(c.addOpensProduct, isTrue);
+      bridge.probeProof = {'sig': 'p'};
+      await c.refreshCartBinding();
+      expect(c.addOpensProduct, isFalse, reason: 'a re-bind re-arms the ensure');
+    });
+
+    test('a bound shopper the server refuses as unlinked: Add opens the product', () async {
+      await openBound();
+      expect(c.addOpensProduct, isFalse);
+      server.chatReply = _turn({'status': 'app_cart_unlinked'});
+      await c.send('add it');
+      expect(c.addOpensProduct, isTrue);
+      server.chatReply = _turn({});
+      await c.send('again');
+      expect(bridge.ensures, 1, reason: 'the refusal re-arms the ensure');
+      expect(c.addOpensProduct, isFalse);
+    });
+  });
+
   test('a stale pull started before a turn is dropped on arrival', () async {
     final gate = Completer<void>();
     server
@@ -307,12 +341,18 @@ class _Bridge implements SunonoCartBridge {
     final gate = probeGate;
     probeGate = null;
     if (gate != null) await gate.future;
-    return {'sig': 'p'};
+    return probeProof;
   }
+
+  /// What probe answers (null = nothing to bind yet).
+  Map<String, dynamic>? probeProof = {'sig': 'p'};
+
+  /// What ensureBind answers (null = the host has no proof).
+  Map<String, dynamic>? ensureProof = {'sig': 'e'};
 
   @override
   Future<Map<String, dynamic>?> ensureBind(String userId) async {
     ensures++;
-    return {'sig': 'e'};
+    return ensureProof;
   }
 }

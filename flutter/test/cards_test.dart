@@ -8,7 +8,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
-import 'package:sunono/src/ui/cards.dart' show ProductCarousel, ProductTile;
+import 'package:sunono/src/ui/cards.dart' show HandoffButton, ProductCarousel, ProductTile;
+import 'package:sunono/src/ui/theme.dart' show contrastRatio;
 import 'package:sunono/sunono.dart';
 
 import 'fake_server.dart';
@@ -44,6 +45,7 @@ void main() {
         ),
         storage: MemoryStorage(),
         lang: lang,
+        cartBridge: _Bridge(), // linked on the first send: Add asks the bot
         onIntent: (i) {
           intents.add(i);
           return handled;
@@ -105,13 +107,13 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('Add: a 48 dp target around the 32 dp button, and a tap action for screen readers', (tester) async {
+    testWidgets('Add: a 48 dp target around the 40 dp button, and a tap action for screen readers', (tester) async {
       final semantics = tester.ensureSemantics();
       await showCards(tester, 'en', [product('prod_a', sku: 'SKU-A1', en: 'Medjool Dates')]);
       final label = find.text('Add to cart');
       final visual = tester.getRect(find.ancestor(of: label, matching: find.byType(InkWell)).first);
-      expect(visual.height, 32);
-      await tester.tapAt(visual.bottomCenter + const Offset(0, 6)); // just below the visible pill
+      expect(visual.height, 40);
+      await tester.tapAt(visual.bottomCenter + const Offset(0, 3)); // just below the visible pill
       await settle(tester);
       expect(lastBody()['action'], 'add_to_cart', reason: 'the margin adds, it does not open the product');
       expect(intents.whereType<OpenProductIntent>(), isEmpty);
@@ -487,6 +489,46 @@ void main() {
     });
   });
 
+  testWidgets('Add stays visible on white, black, gold and pastel brands (3:1 fill, 4.5:1 label)', (tester) async {
+    for (final (brand, dark) in [
+      (Colors.white, false),
+      (Colors.black, true),
+      (const Color(0xFFF2A900), false), // gold
+      (const Color(0xFFF8C8DC), false), // pastel pink
+      (const Color(0xFFF2A900), true),
+    ]) {
+      final theme = SunonoTheme.flat(primary: brand, dark: dark);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 320,
+            child: ProductTile(
+                product: ProductCard.fromJson(product('p', en: 'Mug')), theme: theme, lang: 'en', onOpen: () {}),
+          ),
+        ),
+      ));
+      final ink = tester.widget<Ink>(find.ancestor(of: find.text('Add to cart'), matching: find.byType(Ink)));
+      final fill = (ink.decoration! as BoxDecoration).color!;
+      expect(contrastRatio(fill, theme.surface), greaterThanOrEqualTo(3), reason: '$brand fill');
+      final label = tester.widget<Text>(find.text('Add to cart')).style!.color!;
+      expect(contrastRatio(label, fill), greaterThanOrEqualTo(4.5), reason: '$brand label');
+    }
+  });
+
+  testWidgets('the handoff button stays visible on gold and pastel brands', (tester) async {
+    for (final brand in [const Color(0xFFF2A900), const Color(0xFFF8C8DC), Colors.white]) {
+      final theme = SunonoTheme.flat(primary: brand);
+      await tester.pumpWidget(
+          MaterialApp(home: Scaffold(body: HandoffButton(theme: theme, label: 'Complete your order', onTap: () {}))));
+      final fill = tester
+          .widget<Material>(find.ancestor(of: find.byType(InkWell), matching: find.byType(Material)).first)
+          .color!;
+      expect(contrastRatio(fill, theme.chatBackground), greaterThanOrEqualTo(3), reason: '$brand fill');
+      final label = tester.widget<Text>(find.text('Complete your order')).style!.color!;
+      expect(contrastRatio(label, fill), greaterThanOrEqualTo(4.5), reason: '$brand label');
+    }
+  });
+
   testWidgets('low_stock_qty 0 shows no low-stock badge', (tester) async {
     await showCards(tester, 'en', [
       product('p', en: 'Coffee', more: {'low_stock_qty': 0})
@@ -522,4 +564,11 @@ void main() {
     expect(find.text('أضف للسلة'), findsNWidgets(2));
     await finish(tester);
   });
+}
+
+class _Bridge implements SunonoCartBridge {
+  @override
+  Future<Map<String, dynamic>?> probe(String userId) async => {'sig': 'p'};
+  @override
+  Future<Map<String, dynamic>?> ensureBind(String userId) async => {'sig': 'e'};
 }

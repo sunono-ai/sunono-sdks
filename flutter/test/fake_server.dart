@@ -38,6 +38,13 @@ class FakeServer {
   /// One-shot `/chat/upload` failure `(status, error code)`.
   (int, String)? failUploadOnce;
 
+  /// A voice upload (`audio` field) answers this transcript and duration.
+  String audioTranscript = 'عندكم قهوة؟';
+  int audioDurationMs = 4000;
+
+  /// The `/chat/stream` turn's reply text.
+  String streamReply = 'هاي الصورة';
+
   /// `/chat/stream` answers [failStreamWith] with [failStreamBody], [failStreamTimes] times.
   int? failStreamWith;
   int failStreamTimes = 0;
@@ -123,6 +130,13 @@ class FakeServer {
           failUploadOnce = null;
           return _json({'error': code}, status);
         }
+        if (body.contains('name="audio"')) {
+          return _json({
+            'audio_ref': 'aud_ref_${count('/chat/upload')}',
+            'transcript': audioTranscript,
+            'duration_ms': audioDurationMs
+          });
+        }
         return _json({'image_ref': 'img_ref_${count('/chat/upload')}'});
       case '/chat/stream':
         await beforeStream?.call();
@@ -130,8 +144,8 @@ class FakeServer {
           failStreamTimes--;
           return _json(failStreamBody, failStreamWith!);
         }
-        const frames = 'data: {"type":"stage","stage":"understand"}\n\n'
-            'data: {"type":"done","reply":"هاي الصورة","msg_ref":"msg_p","action_data":{}}\n\n';
+        final frames = 'data: {"type":"stage","stage":"understand"}\n\n'
+            'data: ${jsonEncode({'type': 'done', 'reply': streamReply, 'msg_ref': 'msg_p', 'action_data': {}})}\n\n';
         return http.StreamedResponse(Stream.value(utf8.encode(frames)), 200);
       case '/chat/forget':
         await beforeForget?.call();

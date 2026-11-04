@@ -1,6 +1,19 @@
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart' show IconData, VoidCallback;
+
 import 'models.dart';
+
+/// An outlined chip under the latest reply (and on an empty thread): tapping
+/// it sends [message] as a synthetic turn, or runs [action] instead when set
+/// (e.g. open your offers screen). [icon] null = text only.
+class SunonoQuickReply {
+  const SunonoQuickReply(this.label, this.icon, this.message, {this.action});
+  final String label;
+  final IconData? icon;
+  final String message;
+  final VoidCallback? action;
+}
 
 /// Persists the anonymous shopper id across launches. Pass one backed by
 /// secure storage (e.g. `flutter_secure_storage`); [MemoryStorage] forgets it
@@ -79,6 +92,90 @@ class PhotoFailed extends PhotoState {
         'image_unavailable',
         'customer_blocked'
       }.contains(code);
+}
+
+/// The host's microphone (e.g. the `record` plugin). The SDK draws the
+/// recording bar (timer, level meter, cancel, send), caps a note at 60 s and
+/// stops on app pause, reset and dispose.
+abstract interface class SunonoVoiceRecorder {
+  /// Ask for microphone permission if needed and start recording. false =
+  /// denied or busy: the SDK shows the "allow the microphone" hint.
+  Future<bool> start();
+
+  /// 0..1 input level, about 10 Hz, while recording. An empty stream is fine
+  /// (flat bars). Read once per recording, right after [start] returns true.
+  Stream<double> get levels;
+
+  /// Stop and return the note: AAC in m4a, mono, ≤ 64 kbps recommended (a
+  /// full 60 s is then about 0.5 MB; the cap is 1.5 MB). null = nothing was
+  /// recorded.
+  Future<SunonoAudio?> stop();
+
+  /// Stop and throw the recording away.
+  Future<void> cancel();
+}
+
+/// A recorded voice note.
+class SunonoAudio {
+  const SunonoAudio(this.bytes, {required this.mimeType, required this.duration});
+  final Uint8List bytes;
+
+  /// e.g. `audio/mp4` (m4a), `audio/aac`, `audio/ogg`, `audio/webm`, `audio/wav`.
+  /// The server judges the bytes; this only names the upload.
+  final String mimeType;
+  final Duration duration;
+}
+
+/// Plays voice notes (e.g. `just_audio`). Optional: without one, voice
+/// bubbles show their duration and transcript only.
+abstract interface class SunonoAudioPlayer {
+  /// Play the shopper's own note from [bytes] (just recorded) or [url]
+  /// (restored history, an mp3), stopping anything playing.
+  Future<void> play({Uint8List? bytes, String? url});
+  Future<void> stop();
+
+  /// The playback position of the current note. Broadcast (it may be
+  /// listened to more than once).
+  Stream<Duration> get position;
+
+  /// Broadcast. true once a note is playing; false when it ends or is
+  /// stopped. A false before the first true (e.g. while the source loads) is
+  /// ignored, so a player that replays its current state is fine.
+  Stream<bool> get playing;
+}
+
+/// The voice note being recorded or sent (`SunonoChatController.voice`).
+sealed class VoiceState {
+  const VoiceState();
+}
+
+/// Not recording.
+class VoiceIdle extends VoiceState {
+  const VoiceIdle();
+}
+
+/// Recording for [elapsed]; [level] is the latest input level (0..1) and
+/// [levels] the most recent ones, oldest first (at most 12).
+class VoiceRecording extends VoiceState {
+  const VoiceRecording(this.elapsed, this.level, [this.levels = const []]);
+  final Duration elapsed;
+  final double level;
+  final List<double> levels;
+}
+
+/// The note is uploading; [progress] is 0..1 of the request body sent.
+class VoiceUploading extends VoiceState {
+  const VoiceUploading(this.progress);
+  final double progress;
+}
+
+/// The note never left the device: [code] is `mic_denied` (the recorder
+/// said no), `voice_failed` (it threw), `voice_too_short` (under 1 s) or
+/// `audio_too_large` (over 1.5 MB) or `audio_too_long` (over 60 s). The next recording or send clears it.
+/// Server refusals after upload show on the message instead (`errorCode`).
+class VoiceFailed extends VoiceState {
+  const VoiceFailed(this.code);
+  final String code;
 }
 
 /// Navigation the assistant hands back to the host app.

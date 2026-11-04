@@ -6,6 +6,7 @@ import 'core/api.dart';
 import 'core/controller.dart';
 import 'core/host.dart';
 import 'ui/chat_view.dart';
+import 'ui/header.dart';
 import 'ui/theme.dart';
 
 /// The one-line integration. Call [init] in `main()` (no network happens
@@ -28,8 +29,19 @@ abstract final class Sunono {
   ///   for [CheckoutIntent]; the handoff button then reads «كمّل الطلب» /
   ///   "Complete your order" instead of «…بالموقع» / "…on the site".
   /// - [pickImage]: enables photo messages.
-  /// - [starterPrompts]: replaces the empty-thread starter chips per language,
-  ///   e.g. `{'ar': ['شو في جديد؟'], 'en': ["What's new?"]}`; `[]` shows none.
+  /// - [voiceRecorder]: enables voice notes (the mic shows while the input is
+  ///   empty). Tap to record, tap send (auto-sends at 60 s) or ✕. Implement it
+  ///   with any recorder plugin; the SDK ships no native code.
+  /// - [audioPlayer]: plays voice bubbles; without one they show the duration
+  ///   and transcript only.
+  /// - [onOpenSettings]: opens your app's settings, offered when the recorder
+  ///   reports the microphone permission denied.
+  /// - [quickReplies]: the chips under the latest reply and on an empty
+  ///   thread, per language, e.g.
+  ///   `{'en': [SunonoQuickReply('Gift ideas', Icons.redeem, 'Any gift ideas?')]}`;
+  ///   at most 3, `[]` shows none. Defaults: "Browse offers" and "Talk to our team".
+  /// - [starterPrompts]: deprecated, use [quickReplies]; text-only chips on
+  ///   the empty thread only, per language, where [quickReplies] has none.
   /// - [locale]: `ar` / `en`; null follows the shop's `default_language`.
   /// - [theme]: null follows the shop's dashboard color over your Material theme.
   /// - [onIntent]: route product/cart/checkout taps; return true if handled.
@@ -42,8 +54,12 @@ abstract final class Sunono {
     SunonoCartBridge? cartBridge,
     bool nativeCheckout = false,
     Future<SunonoImage?> Function()? pickImage,
+    SunonoVoiceRecorder? voiceRecorder,
+    SunonoAudioPlayer? audioPlayer,
+    VoidCallback? onOpenSettings,
     bool Function(SunonoIntent intent)? onIntent,
     Map<String, List<String>>? starterPrompts,
+    Map<String, List<SunonoQuickReply>>? quickReplies,
     SunonoTheme? theme,
     http.Client Function()? httpClientFactory,
   }) {
@@ -63,6 +79,10 @@ abstract final class Sunono {
       nativeCheckout: nativeCheckout,
       onIntent: onIntent,
       starterPrompts: starterPrompts,
+      quickReplies: quickReplies,
+      voiceRecorder: voiceRecorder,
+      audioPlayer: audioPlayer,
+      onOpenSettings: onOpenSettings,
     );
   }
 
@@ -126,11 +146,26 @@ abstract final class Sunono {
   }
 
   /// The chat screen with the facade's photo picker and theme wired in.
-  static Widget view({SunonoTheme? theme, bool showHeader = true, bool autofocus = false}) => SunonoChatView(
+  /// [onBack] shows the header's back button (pop your route); [menuItems]
+  /// add to its ⋮ menu; [welcomeTitle]/[welcomeSubtitle] replace the welcome
+  /// card's copy per language.
+  static Widget view(
+          {SunonoTheme? theme,
+          bool showHeader = true,
+          bool autofocus = false,
+          VoidCallback? onBack,
+          List<SunonoMenuItem> menuItems = const [],
+          Map<String, String>? welcomeTitle,
+          Map<String, String>? welcomeSubtitle}) =>
+      SunonoChatView(
         controller: controller,
         theme: theme ?? _theme,
         pickImage: _pickImage,
         showHeader: showHeader,
         autofocus: autofocus,
+        onBack: onBack,
+        menuItems: menuItems,
+        welcomeTitle: welcomeTitle,
+        welcomeSubtitle: welcomeSubtitle,
       );
 }

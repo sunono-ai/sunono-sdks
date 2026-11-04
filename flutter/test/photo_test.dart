@@ -442,6 +442,14 @@ void main() {
       await settle(tester);
     }
 
+    /// `+`, then Photo in the attachment sheet.
+    Future<void> pickPhoto(WidgetTester tester, {bool en = false}) async {
+      await tester.tap(find.byTooltip(en ? 'Attach' : 'إرفاق'));
+      await settle(tester);
+      await tester.tap(find.text(en ? 'Photo' : 'صورة'));
+      await settle(tester);
+    }
+
     Future<void> tapSend(WidgetTester tester) async {
       await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
       await settle(tester);
@@ -449,7 +457,7 @@ void main() {
 
     testWidgets('empty caption: Send is tappable, shows the inline hint and sends nothing', (tester) async {
       await pump(tester);
-      await tester.tap(find.byTooltip('أرفق صورة'));
+      await pickPhoto(tester);
       await settle(tester);
       expect(c.photo.value, isA<PhotoReady>());
       expect(find.text('اكتب سؤالك عن الصورة…'), findsOneWidget, reason: 'placeholder only');
@@ -471,11 +479,11 @@ void main() {
     testWidgets('image_unavailable shows the per-code copy without Retry; picking again uploads anew', (tester) async {
       await pump(tester);
       server.failUploadOnce = (503, 'image_unavailable');
-      await tester.tap(find.byTooltip('أرفق صورة'));
+      await pickPhoto(tester);
       await settle(tester);
       expect(find.text('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام'), findsOneWidget);
       expect(find.text('أعد المحاولة'), findsNothing);
-      await tester.tap(find.byTooltip('أرفق صورة'));
+      await pickPhoto(tester);
       await settle(tester);
       expect(find.text('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام'), findsNothing);
       expect(c.photo.value, isA<PhotoReady>());
@@ -487,7 +495,7 @@ void main() {
     testWidgets('a retryable failure shows Retry, which re-uploads', (tester) async {
       await pump(tester);
       server.failUploadOnce = (429, 'rate_limited');
-      await tester.tap(find.byTooltip('أرفق صورة'));
+      await pickPhoto(tester);
       await settle(tester);
       await tester.tap(find.text('أعد المحاولة'));
       await settle(tester);
@@ -501,7 +509,7 @@ void main() {
         (tester) async {
       await pump(tester, lang: 'en');
       server.failUploadOnce = (403, 'customer_blocked');
-      await tester.tap(find.byTooltip('Attach a photo'));
+      await pickPhoto(tester, en: true);
       await settle(tester);
       expect(find.text("We can't accept photos right now"), findsOneWidget);
       expect(find.text('Retry'), findsNothing);
@@ -521,7 +529,7 @@ void main() {
     testWidgets('a retryable failure keeps Send inert until Retry works', (tester) async {
       await pump(tester, lang: 'en');
       server.failUploadOnce = (429, 'rate_limited');
-      await tester.tap(find.byTooltip('Attach a photo'));
+      await pickPhoto(tester, en: true);
       await settle(tester);
       await tester.enterText(find.byType(TextField), 'what is this');
       await tester.pump();
@@ -568,7 +576,7 @@ void main() {
 
     testWidgets('remove-photo has a 48 dp target around its small button', (tester) async {
       await pump(tester, lang: 'en');
-      await tester.tap(find.byTooltip('Attach a photo'));
+      await pickPhoto(tester, en: true);
       await settle(tester);
       expect(c.photo.value, isA<PhotoReady>());
       final button = find.byTooltip('Remove photo');
@@ -587,7 +595,7 @@ void main() {
       addTearDown(tester.view.reset);
       await pump(tester, lang: 'en', scale: 2);
       server.failUploadOnce = (503, 'image_unavailable');
-      await tester.tap(find.byTooltip('Attach a photo'));
+      await pickPhoto(tester, en: true);
       await settle(tester);
       expect(find.text("Photos aren't available right now — tell me in words"), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -613,7 +621,7 @@ void main() {
       await tester.pumpWidget(
           app(SunonoChatView(controller: c, pickImage: () async => SunonoImage(_jpeg(5 * 1024 * 1024 + 1)))));
       await settle(tester);
-      await tester.tap(find.byTooltip('Attach a photo'));
+      await pickPhoto(tester, en: true);
       await settle(tester);
       expect(find.text('That photo is too large'), findsOneWidget);
       expect(find.text('Retry'), findsNothing);

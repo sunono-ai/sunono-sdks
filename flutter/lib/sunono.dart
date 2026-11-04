@@ -23,8 +23,11 @@ export 'src/core/models.dart'
         CheckoutPlaced,
         CheckoutField,
         OrderIds,
+        CheckoutHandoff,
         ShopConfig;
 export 'src/sunono.dart';
 export 'src/ui/chat_view.dart' show SunonoChatView;
+export 'src/ui/header.dart' show SunonoMenuItem;
+// ignore: deprecated_member_use_from_same_package
 export 'src/ui/orb.dart' show PresenceOrb;
 export 'src/ui/theme.dart' show SunonoTheme;
