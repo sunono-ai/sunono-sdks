@@ -794,10 +794,9 @@ class _DayPill extends StatelessWidget {
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 12),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration:
-                BoxDecoration(color: theme.outline.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(999)),
+            decoration: BoxDecoration(color: theme.datePill, borderRadius: BorderRadius.circular(999)),
             child: Text(label,
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.text(size: 12, color: theme.muted)),
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.text(size: 12, color: theme.onDatePill)),
           ),
         ),
         line,

@@ -18,8 +18,8 @@ class SunonoTheme {
     this.surface = Colors.white,
     this.onSurface = const Color(0xFF1C1B22),
     this.muted = const Color(0xFF6E6B78),
-    this.success = const Color(0xFF078B5B),
-    this.danger = const Color(0xFFD6365C),
+    this.success = const Color(0xFF06774F),
+    this.danger = const Color(0xFFC02048),
     this.fontFamily,
     this.fontFamilyFallback,
     this.radius = 18,
@@ -74,7 +74,7 @@ class SunonoTheme {
       onSurface: c.onSurface,
       muted: readableOn(c.onSurfaceVariant, [chat, surface]),
       // The light-mode green is 3:1 on a dark page: use the dark-mode one.
-      success: dark ? const Color(0xFF3DD69A) : const Color(0xFF078B5B),
+      success: dark ? const Color(0xFF3DD69A) : const Color(0xFF06774F),
       danger: c.error,
       fontFamily: t.textTheme.bodyMedium?.fontFamily,
       fontFamilyFallback: t.textTheme.bodyMedium?.fontFamilyFallback,
@@ -190,6 +190,10 @@ class SunonoTheme {
 
   /// Hairlines and borders (header bottom, composer, cards).
   Color get outline => _outline ?? Color.alphaBlend(onSurface.withValues(alpha: 0.12), surface);
+
+  /// The date pill's fill, and its text ([muted] shifted to 4.5:1 on it).
+  Color get datePill => Color.alphaBlend(outline.withValues(alpha: 0.4), chatBackground);
+  Color get onDatePill => readableOn(muted, [datePill]);
 
   /// Whether the page is dark (the chat page, not the host chrome around it).
   bool get isDark => chatBackground.computeLuminance() < 0.5;
