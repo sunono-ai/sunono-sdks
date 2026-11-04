@@ -1049,7 +1049,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (_disposed) return;
     if (gen != _voiceGen || epoch != _epoch) {
-      _voice.value = const VoiceIdle(); // reset meanwhile: the old shopper's note is dropped
+      // Reset meanwhile: the old shopper's note is dropped. Don't clobber a
+      // recording the new shopper has started since.
+      if (_voice.value is VoiceUploading) _voice.value = const VoiceIdle();
       return;
     }
     if (_busy || _status != ChatStatus.ready || updateRequired) {
