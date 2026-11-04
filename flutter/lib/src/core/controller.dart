@@ -1259,7 +1259,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     final SunonoIntent intent = cart ? const OpenCartIntent() : CheckoutIntent(url: url);
     final handled = _hand(intent) || (cart && nativeCheckout && _hand(const CheckoutIntent()));
     if (!handled) _emit(ErrorEvent(UnhandledIntent(intent)));
-    _unbind(); // the order completes on the storefront and rotates its cart
+    // A site checkout completes on the storefront and rotates its cart; opening
+    // the host cart keeps the link (the host calls refreshCartBinding after an order).
+    if (!cart) _unbind();
     return handled;
   }
 
