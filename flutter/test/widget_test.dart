@@ -157,7 +157,8 @@ void main() {
     server.chatReply = {'reply': 'See https://shop.example/p for more', 'action_data': <String, dynamic>{}};
     await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
     await settle(tester);
-    final send = find.bySemanticsLabel('Send');
+    // An IconButton: its tooltip is what screen readers say.
+    final send = find.byTooltip('Send');
     // isSemantics replaces it from Flutter 3.40; the floor is 3.27.
     // ignore: deprecated_member_use
     expect(tester.getSemantics(send), containsSemantics(isButton: true, hasEnabledState: true, isEnabled: false));

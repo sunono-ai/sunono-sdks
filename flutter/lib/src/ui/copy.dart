@@ -16,7 +16,9 @@ class SunonoCopy {
   String get inputHint => _t('اكتب رسالتك…', 'Type a message…');
   String get photoCaptionHint => _t('اكتب سؤالك عن الصورة…', 'Ask something about the photo…');
   String get send => _t('إرسال', 'Send');
-  String get attachPhoto => _t('أرفق صورة', 'Attach a photo');
+  String get attach => _t('إرفاق', 'Attach');
+  String get photo => _t('صورة', 'Photo');
+  String get recordVoice => _t('سجّل رسالة صوتية', 'Record a voice message');
   String get removePhoto => _t('شيل الصورة', 'Remove photo');
   String get welcome => _t('أهلاً بك! كيف يمكنني مساعدتك اليوم؟', 'Hi! How can I help you today?');
 

@@ -9,6 +9,7 @@ import '../core/format.dart';
 import '../core/host.dart';
 import '../core/models.dart';
 import 'cards.dart';
+import 'composer.dart';
 import 'copy.dart';
 import 'header.dart';
 import 'theme.dart';
@@ -299,7 +300,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
           ),
         ValueListenableBuilder<PhotoState>(
           valueListenable: _c.photo,
-          builder: (context, photo, _) => _Composer(
+          builder: (context, photo, _) => Composer(
             theme: theme,
             controller: _input,
             focus: _focus,
@@ -313,7 +314,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                   PhotoIdle() => _input.text.trim().isNotEmpty,
                 },
             onSend: _send,
-            onAttach: widget.pickImage == null ? null : _attach,
+            onPickPhoto: widget.pickImage == null ? null : _attach,
             photo: photo,
             image: _c.photoImage,
             needCaption: _needCaption,
@@ -331,7 +332,10 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       child: ColoredBox(
         color: theme.chatBackground,
         child: SafeArea(
-          top: false, // the header pads under the status bar on its own color
+          // The header and the composer pad the status bar and the home
+          // indicator on their own colors.
+          top: false,
+          bottom: false,
           child: Column(children: [
             if (widget.showHeader)
               ChatHeader(
@@ -894,203 +898,4 @@ void _openLightbox(BuildContext context, ChatMessage m, SunonoCopy t, String lan
       ),
     ),
   ));
-}
-
-class _Composer extends StatelessWidget {
-  const _Composer({
-    required this.theme,
-    required this.controller,
-    required this.focus,
-    required this.hint,
-    required this.canSend,
-    required this.onSend,
-    required this.onAttach,
-    required this.photo,
-    required this.image,
-    required this.needCaption,
-    required this.onRemovePhoto,
-    required this.onRetryPhoto,
-    required this.copy,
-    required this.autofocus,
-  });
-
-  final SunonoTheme theme;
-  final bool autofocus;
-  final TextEditingController controller;
-  final FocusNode focus;
-  final String hint;
-  final bool canSend;
-  final VoidCallback onSend;
-  final VoidCallback? onAttach;
-  final PhotoState photo;
-  final SunonoImage? image;
-  final bool needCaption;
-  final VoidCallback onRemovePhoto;
-  final VoidCallback onRetryPhoto;
-  final SunonoCopy copy;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: theme.surface,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: theme.outline),
-        ),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (photo is! PhotoIdle && image != null) ...[
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              // The 6 dp margin is inside the Stack so the remove button's
-              // 48 dp target (which overhangs the preview) is hit-testable.
-              child: Stack(children: [
-                Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.memory(
-                      image!.bytes,
-                      width: 64,
-                      height: 64,
-                      fit: BoxFit.cover,
-                      // Magic bytes pass but the pixels may not decode: still removable.
-                      errorBuilder: (_, __, ___) =>
-                          SizedBox(width: 64, height: 64, child: Icon(Icons.broken_image_outlined, color: theme.muted)),
-                    ),
-                  ),
-                ),
-                if (photo case PhotoUploading(:final progress))
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: ColoredBox(
-                          color: Colors.black38,
-                          child: Center(
-                            child: SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(
-                                value: progress,
-                                strokeWidth: 3,
-                                color: Colors.white,
-                                semanticsLabel: copy.uploadingPhoto((progress * 100).round()),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                PositionedDirectional(
-                  top: 0,
-                  end: 0,
-                  // 48 dp to touch, the same small circle to see.
-                  child: Semantics(
-                    button: true,
-                    label: copy.removePhoto,
-                    onTap: onRemovePhoto,
-                    excludeSemantics: true,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: onRemovePhoto,
-                      child: SizedBox.square(
-                        dimension: 48,
-                        child: Align(
-                          alignment: AlignmentDirectional.topEnd,
-                          child: Padding(
-                            padding: const EdgeInsetsDirectional.only(top: 2, end: 2),
-                            child: IconButton.filledTonal(
-                              visualDensity: VisualDensity.compact,
-                              style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                              iconSize: 14,
-                              tooltip: copy.removePhoto,
-                              onPressed: onRemovePhoto,
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ]),
-            ),
-            if (photo case PhotoFailed(:final code, :final retryable))
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 10, 4),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Semantics(
-                    liveRegion: true,
-                    child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
-                      Text(copy.photoError(code), style: theme.text(size: 13, color: theme.danger)),
-                      if (retryable) TextButton(onPressed: onRetryPhoto, child: Text(copy.retry)),
-                    ]),
-                  ),
-                ),
-              ),
-            if (needCaption)
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 10, 4),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Semantics(
-                    liveRegion: true,
-                    child: Text(copy.photoCaptionHint, style: theme.text(size: 13, color: theme.danger)),
-                  ),
-                ),
-              ),
-          ],
-          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            if (onAttach != null)
-              IconButton(
-                onPressed: onAttach,
-                tooltip: copy.attachPhoto,
-                icon: Icon(Icons.add_photo_alternate_outlined, color: theme.primaryText),
-              ),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                focusNode: focus,
-                autofocus: autofocus,
-                minLines: 1,
-                maxLines: 5,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
-                style: theme.text(size: 15),
-                decoration: InputDecoration(
-                  hintText: hint,
-                  hintMaxLines: 1, // a wrapped hint at 200% text would eat the screen
-                  hintStyle: theme.text(size: 15, color: theme.muted),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-              ),
-            ),
-            Semantics(
-              button: true,
-              enabled: canSend,
-              label: copy.send,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 150),
-                opacity: canSend ? 1 : 0.4,
-                child: GestureDetector(
-                  onTap: canSend ? onSend : null,
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(color: theme.userBubble, shape: BoxShape.circle),
-                    child:
-                        Icon(Icons.arrow_upward_rounded, color: theme.onUserBubble, textDirection: TextDirection.ltr),
-                  ),
-                ),
-              ),
-            ),
-          ]),
-        ]),
-      );
 }
