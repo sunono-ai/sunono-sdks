@@ -39,7 +39,9 @@ class SunonoCopy {
   String get delivered => _t('تم الإرسال', 'Delivered');
   String get sending => _t('عم نبعث', 'Sending');
   String get copy => _t('نسخ', 'Copy');
-  String get copied => _t('تم النسخ', 'Copied');
+  String get copied => _t('انسخت', 'Copied');
+  String get notSent => _t('ما انبعثت', 'Not sent');
+  String get yourMessageNotSent => _t('ما انبعثت رسالتك', "Your message wasn't sent");
 
   /// Sent (synthetic) by "Talk to our team": the server's escalate intent.
   String get escalatePhrase => _t('بدي أحكي مع حدا من الفريق', "I'd like to talk to someone from your team");

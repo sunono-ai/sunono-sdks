@@ -197,67 +197,76 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       // The welcome is a permanent first bot bubble, not a message from the server.
       final welcome = ChatMessage(id: 'welcome', role: ChatRole.bot, text: _c.config.welcome(lang) ?? t.welcome);
       final now = DateTime.now();
-      bool botish(ChatMessage m) => m.role == ChatRole.bot || m.role == ChatRole.staff;
+      // A failed send's error row is the shopper's, not a bot bubble: it breaks a bot group.
+      bool botish(ChatMessage m) =>
+          (m.role == ChatRole.bot || m.role == ChatRole.staff) && m.state != MessageState.failed;
       // A date pill before the first message of each local day; the first
       // day's sits above the welcome bubble (the mockup's order).
       String? dayAbove(int i) =>
           i == 0 || !sameDay(msgs[i].ts, msgs[i - 1].ts) ? formatDayLabel(msgs[i].ts, lang, now) : null;
       body = Column(children: [
         Expanded(
-          child: ListView.builder(
-            // Bottom-anchored once there are messages; an empty thread starts
-            // under the header (welcome card first), like the mockup.
-            reverse: msgs.isNotEmpty,
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            itemCount: msgs.length + 2,
-            itemBuilder: (_, row) {
-              final i = msgs.isNotEmpty ? row : 1 - row; // [card, welcome] top-down when empty
-              final index = msgs.length - 1 - i;
-              if (index < -1) {
-                return WelcomeCard(
-                  theme: theme,
-                  title: widget.welcomeTitle?[lang] ?? t.welcomeTitle,
-                  subtitle: widget.welcomeSubtitle?[lang] ?? t.welcomeSubtitle,
-                );
-              }
-              if (index < 0) {
+          // Reversed, so a long thread is anchored to the composer (newest in
+          // view, kept there when the keyboard opens). Shrink-wrapped and
+          // aligned top, so a thread shorter than the screen starts right under
+          // the header like the mockup, with the space below it.
+          // ponytail: shrinkWrap re-lays the list out on scroll; fine for chat
+          // history sizes, a custom sliver if threads grow to thousands.
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ListView.builder(
+              reverse: true,
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+              itemCount: msgs.length + 2,
+              itemBuilder: (_, i) {
+                final index = msgs.length - 1 - i;
+                if (index < -1) {
+                  return WelcomeCard(
+                    theme: theme,
+                    title: widget.welcomeTitle?[lang] ?? t.welcomeTitle,
+                    subtitle: widget.welcomeSubtitle?[lang] ?? t.welcomeSubtitle,
+                  );
+                }
+                if (index < 0) {
+                  return _MessageItem(
+                    key: const ValueKey('welcome'),
+                    message: welcome,
+                    controller: _c,
+                    theme: theme,
+                    lang: lang,
+                    title: title,
+                    isLast: false,
+                    timed: false,
+                    dayLabel: msgs.isEmpty ? null : dayAbove(0),
+                    avatar: msgs.isEmpty || !botish(msgs.first),
+                    footer: starters == null || starters.isEmpty
+                        ? null
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Wrap(spacing: 8, runSpacing: 8, children: [
+                              for (final p in starters)
+                                SunonoChip(
+                                    theme: theme, label: p, onTap: _c.busy ? null : () => _c.send(p, synthetic: true)),
+                            ]),
+                          ),
+                  );
+                }
                 return _MessageItem(
-                  key: const ValueKey('welcome'),
-                  message: welcome,
+                  key: ValueKey(msgs[index].id),
+                  message: msgs[index],
                   controller: _c,
                   theme: theme,
                   lang: lang,
                   title: title,
-                  isLast: false,
-                  timed: false,
-                  dayLabel: msgs.isEmpty ? null : dayAbove(0),
-                  avatar: msgs.isEmpty || !botish(msgs.first),
-                  footer: starters == null || starters.isEmpty
-                      ? null
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Wrap(spacing: 8, runSpacing: 8, children: [
-                            for (final p in starters)
-                              SunonoChip(
-                                  theme: theme, label: p, onTap: _c.busy ? null : () => _c.send(p, synthetic: true)),
-                          ]),
-                        ),
+                  isLast: index == msgs.length - 1,
+                  dayLabel: index == 0 ? null : dayAbove(index),
+                  // The avatar marks the last bubble of a run of bot/staff messages.
+                  avatar: index == msgs.length - 1 || !botish(msgs[index + 1]),
+                  onClose: widget.onClose,
                 );
-              }
-              return _MessageItem(
-                key: ValueKey(msgs[index].id),
-                message: msgs[index],
-                controller: _c,
-                theme: theme,
-                lang: lang,
-                title: title,
-                isLast: index == msgs.length - 1,
-                dayLabel: index == 0 ? null : dayAbove(index),
-                // The avatar marks the last bubble of a run of bot/staff messages.
-                avatar: index == msgs.length - 1 || !botish(msgs[index + 1]),
-                onClose: widget.onClose,
-              );
-            },
+              },
+            ),
           ),
         ),
         if (_c.cart != null && _c.cart!.count > 0)
@@ -423,9 +432,18 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
   Future<void> _copy(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    // ponytail: SemanticsService.sendAnnouncement needs Flutter 3.35; the floor is 3.27.
-    // ignore: deprecated_member_use
-    unawaited(SemanticsService.announce(SunonoCopy.of(widget.lang).copied, Directionality.of(context)));
+    final copied = SunonoCopy.of(widget.lang).copied;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger != null) {
+      // Sighted feedback (iOS shows none); a SnackBar is announced by screen readers too.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(copied), duration: const Duration(seconds: 2)));
+    } else {
+      // ponytail: SemanticsService.sendAnnouncement needs Flutter 3.35; the floor is 3.27.
+      // ignore: deprecated_member_use
+      unawaited(SemanticsService.announce(copied, Directionality.of(context)));
+    }
   }
 
   /// Long-press on a bubble: a one-item "Copy" menu anchored on it.
@@ -497,8 +515,10 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
       ),
     );
     const pad = EdgeInsets.symmetric(horizontal: 14, vertical: 12);
+    // A shopper bubble whose turn neither returned nor is running: it failed.
+    final failed = user && !m.delivered && !c.isSending(m);
     final time = Text(formatTime(m.ts, widget.lang),
-        textDirection: TextDirection.ltr, style: theme.text(size: 11, color: theme.muted));
+        textDirection: TextDirection.ltr, style: theme.text(size: 11, color: failed ? theme.danger : theme.muted));
 
     if (m.role == ChatRole.system) {
       return Center(
@@ -514,9 +534,9 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
     if (user) {
       final status = m.delivered
           ? Icon(Icons.done_all, size: 14, color: theme.primaryText, semanticLabel: t.delivered)
-          : c.isSending(m)
-              ? Icon(Icons.schedule_rounded, size: 14, color: theme.muted, semanticLabel: t.sending)
-              : null; // failed: the retry sits on the bot's error below
+          : failed
+              ? Icon(Icons.error_outline_rounded, size: 14, color: theme.danger, semanticLabel: t.notSent)
+              : Icon(Icons.schedule_rounded, size: 14, color: theme.muted, semanticLabel: t.sending);
       return Align(
         alignment: AlignmentDirectional.centerEnd,
         child: ConstrainedBox(
@@ -555,7 +575,8 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
               ),
               under: Row(mainAxisSize: MainAxisSize.min, children: [
                 time,
-                if (status != null) ...[const SizedBox(width: 4), status],
+                const SizedBox(width: 4),
+                status,
               ]),
             ),
           ]),
@@ -595,19 +616,27 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
         ),
       ));
     } else if (m.state == MessageState.failed) {
-      children.add(Semantics(
-        liveRegion: true,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.error_outline_rounded, size: 18, color: theme.danger),
-          const SizedBox(width: 6),
-          Flexible(child: Text(t.error(m.errorCode), style: theme.text(size: 13, color: theme.danger))),
+      // The shopper's failed send: under their bubble on the end side, no
+      // bot avatar, so it never reads as the assistant speaking.
+      return Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Semantics(
+            liveRegion: true,
+            label: t.yourMessageNotSent,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.error_outline_rounded, size: 18, color: theme.danger),
+              const SizedBox(width: 6),
+              Flexible(child: Text(t.error(m.errorCode), style: theme.text(size: 13, color: theme.danger))),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: SunonoChip(
+                theme: theme, label: t.retry, icon: Icons.refresh_rounded, onTap: c.busy ? null : () => c.retry(m)),
+          ),
         ]),
-      ));
-      children.add(Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: SunonoChip(
-            theme: theme, label: t.retry, icon: Icons.refresh_rounded, onTap: c.busy ? null : () => c.retry(m)),
-      ));
+      );
     } else {
       final staff = m.role == ChatRole.staff;
       if (staff) {

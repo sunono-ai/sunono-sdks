@@ -170,7 +170,22 @@ void main() {
     await settle(tester);
     expect(find.text('Retry'), findsOneWidget);
     expect(find.byIcon(Icons.schedule_rounded), findsNothing);
-    expect(find.byIcon(Icons.done_all), findsNWidgets(2), reason: 'the failed bubble has no tick');
+    expect(find.byIcon(Icons.done_all), findsNWidgets(2), reason: 'the failed bubble has no ✓✓');
+    // The failed bubble carries its own marker: an error icon in the tick slot and a danger time.
+    Finder inItem(String text, Finder f) => find.descendant(
+        of: find.ancestor(
+            of: find.text(text), matching: find.byWidgetPredicate((w) => '${w.runtimeType}' == '_MessageItem')),
+        matching: f);
+    final marker = tester.widget<Icon>(inItem('lost', find.byIcon(Icons.error_outline_rounded)));
+    expect(marker.semanticLabel, 'Not sent');
+    final lost = c.messages.firstWhere((m) => m.text == 'lost');
+    expect(tester.widget<Text>(inItem('lost', find.text(formatTime(lost.ts, 'en')))).style!.color, marker.color);
+    // The error row is the shopper's: end side, no bot avatar, its own label.
+    expect(inItem("The message didn't go through", find.byType(ShopAvatar)), findsNothing);
+    expect(inItem('تمام', find.byType(ShopAvatar)), findsOneWidget, reason: 'the bot bubble before it ends its group');
+    expect(tester.getCenter(find.text('Retry')).dx, greaterThan(200));
+    final errorRow = find.ancestor(of: find.text("The message didn't go through"), matching: find.byType(Semantics));
+    expect(tester.widgetList<Semantics>(errorRow).any((s) => s.properties.label == "Your message wasn't sent"), isTrue);
     await finish(tester);
   });
 
@@ -215,6 +230,9 @@ void main() {
     await tester.tap(find.text('Copy'));
     await tester.pumpAndSettle();
     expect(copied.last, 'my order 1042');
+    expect(find.text('Copied'), findsOneWidget, reason: 'a SnackBar for sighted users');
+    await tester.pumpAndSettle(const Duration(seconds: 3));
+    expect(find.text('Copied'), findsNothing);
     await finish(tester);
   });
 

@@ -231,7 +231,7 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('empty thread: the welcome card sits under the header; with messages the thread is bottom-anchored',
+  testWidgets('a thread shorter than the screen starts under the header; a long one is anchored to the composer',
       (tester) async {
     await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
     await settle(tester);
@@ -240,13 +240,29 @@ void main() {
     expect(card - header, lessThan(80));
     expect(tester.getTopLeft(find.text('Hi! How can I help you today?')).dy, greaterThan(card));
 
-    await tester.enterText(find.byType(TextField), 'hello');
-    await tester.pump();
-    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
-    await settle(tester);
+    Future<void> send(String text) async {
+      await tester.enterText(find.byType(TextField), text);
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+      await settle(tester);
+    }
+
+    await send('hello');
     expect(tester.widget<ListView>(find.byType(ListView)).reverse, isTrue);
-    // A short thread is anchored to the composer: the card moved down from under the header.
-    expect(tester.getTopLeft(find.text('Hello, how can we help?')).dy, greaterThan(card + 40));
+    // Still short: no blank band above the card, the space is below the thread.
+    expect(tester.getTopLeft(find.text('Hello, how can we help?')).dy, card);
+
+    // Long: the newest message sits right above the composer, the card scrolled away.
+    for (var i = 0; i < 8; i++) {
+      server.chatReply = {'reply': 'reply $i', 'msg_ref': 'r$i', 'action_data': <String, dynamic>{}};
+      await send('message $i');
+    }
+    final composer = tester.getTopLeft(find.byType(TextField)).dy;
+    expect(find.text('reply 7'), findsOneWidget);
+    final newest = tester.getBottomLeft(find.text('reply 7')).dy;
+    expect(newest, lessThan(composer));
+    expect(composer - newest, lessThan(80));
+    expect(find.text('Hello, how can we help?'), findsNothing);
     await finish(tester);
   });
 }
