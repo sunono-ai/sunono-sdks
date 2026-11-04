@@ -85,6 +85,35 @@ String formatTime(DateTime t, String lang) {
   return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
 }
 
+const _monthsAr = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', //
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+const _monthsEn = [
+  'January', 'February', 'March', 'April', 'May', 'June', //
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/// The thread's date pill: «اليوم» / "Today", «مبارح» / "Yesterday", else
+/// «4 نوفمبر» / "4 November" (plus the year when it isn't [now]'s). Local
+/// calendar days, Latin digits, no `intl`.
+String formatDayLabel(DateTime ts, String lang, DateTime now) {
+  final d = ts.toLocal(), n = now.toLocal();
+  final days = DateTime(n.year, n.month, n.day).difference(DateTime(d.year, d.month, d.day)).inHours;
+  final en = lang == 'en';
+  // inHours, not inDays: a DST day is 23 or 25 hours long.
+  if (days.abs() < 12) return en ? 'Today' : 'اليوم';
+  if (days > 12 && days < 36) return en ? 'Yesterday' : 'مبارح';
+  final year = d.year == n.year ? '' : ' ${d.year}';
+  return '${d.day} ${(en ? _monthsEn : _monthsAr)[d.month - 1]}$year';
+}
+
+/// Same local calendar day.
+bool sameDay(DateTime a, DateTime b) {
+  final x = a.toLocal(), y = b.toLocal();
+  return x.year == y.year && x.month == y.month && x.day == y.day;
+}
+
 // Unicode format characters (category Cf): bidi controls, zero-width, joiners.
 const _formatChars =
     '\u00AD\u0600-\u0605\u061C\u06DD\u070F\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF';

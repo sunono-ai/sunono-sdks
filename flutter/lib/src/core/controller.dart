@@ -69,6 +69,7 @@ class ChatMessage {
     this.stage,
     this.replyLang,
     this.errorCode,
+    this.delivered = false,
   }) : ts = ts ?? DateTime.now();
 
   final String id;
@@ -94,6 +95,10 @@ class ChatMessage {
 
   /// Why a send failed (`image_too_large`, `rate_limited`, `offline`, …).
   String? errorCode;
+
+  /// A shopper bubble the server has: its turn returned, or a history row
+  /// matched it. Restored rows are delivered.
+  bool delivered;
 
   /// For a retry: what was sent.
   _Outgoing? _outgoing;
@@ -243,6 +248,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   Completer<void>? _abortUpload;
 
   List<ChatMessage> get messages => List.unmodifiable(_messages);
+
+  /// [m] is the shopper bubble whose turn is in flight (thinking or recovering).
+  bool isSending(ChatMessage m) => identical(_running?.user, m);
   String get lang => _lang;
   ChatStatus get status => _status;
   ShopConfig get config => _config;
@@ -883,6 +891,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _apply(ChatMessage bot, TurnResult r) {
+    bot._outgoing?.user.delivered = true;
     if (r.typingHint != null) _typingHint = r.typingHint!;
     // ponytail: turn vs live cart order has no server version; a late turn snapshot can overwrite a newer live one - needs a server cart version
     if (r.cartPresent || r.cartMutated) _cartWritten();
@@ -991,6 +1000,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         handoffUrl: r.handoffUrl,
         msgRef: r.msgRef,
         ts: r.ts,
+        delivered: true,
       );
 
   /// History user rows this screen doesn't account for. A user row is
@@ -1041,7 +1051,9 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
           final local =
               _messages.where((m) => m.role == ChatRole.user && m.msgRef == null && m.text == r.text).firstOrNull;
           if (local != null) {
-            local.msgRef = r.msgRef ?? '_local_${local.id}';
+            local
+              ..msgRef = r.msgRef ?? '_local_${local.id}'
+              ..delivered = true;
             continue;
           }
         } else if (r.msgRef == null && _sameRecentBubble(r)) {

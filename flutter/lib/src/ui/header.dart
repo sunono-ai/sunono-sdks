@@ -61,7 +61,6 @@ class ChatHeader extends StatelessWidget {
       HeaderStatus.team => (copy.humanOnline, theme.online),
       HeaderStatus.unavailable => (copy.offline, theme.muted),
     };
-    Widget monogram() => _Monogram(theme: theme, title: title);
     return DecoratedBox(
       decoration:
           BoxDecoration(color: theme.headerBackground, border: Border(bottom: BorderSide(color: theme.outline))),
@@ -77,21 +76,7 @@ class ChatHeader extends StatelessWidget {
                 icon: const BackButtonIcon(),
                 tooltip: backIsClose ? copy.close : copy.back,
               ),
-            if (avatarUrl == null)
-              monogram()
-            else
-              ClipOval(
-                child: Image.network(
-                  avatarUrl!,
-                  width: 44,
-                  height: 44,
-                  fit: BoxFit.cover,
-                  cacheWidth: (44 * MediaQuery.devicePixelRatioOf(context)).ceil(),
-                  excludeFromSemantics: true,
-                  loadingBuilder: (_, child, progress) => progress == null ? child : monogram(),
-                  errorBuilder: (_, __, ___) => monogram(),
-                ),
-              ),
+            ShopAvatar(theme: theme, title: title, url: avatarUrl, size: 44, on: theme.headerBackground),
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -141,28 +126,47 @@ class ChatHeader extends StatelessWidget {
   }
 }
 
-/// The shop's initial on a [SunonoTheme.primary] tint: the header avatar
-/// when the shop has none.
-class _Monogram extends StatelessWidget {
-  const _Monogram({required this.theme, required this.title});
+/// The shop's avatar ([url]), decorative. The flat monogram (the shop's
+/// initial on a [SunonoTheme.primary] tint over [on]) shows while it loads,
+/// when it fails, or when the shop has none. In the header and beside bot bubbles.
+class ShopAvatar extends StatelessWidget {
+  const ShopAvatar(
+      {super.key, required this.theme, required this.title, required this.url, required this.size, required this.on});
   final SunonoTheme theme;
   final String title;
+  final String? url;
+  final double size;
+  final Color on;
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: 44,
-        height: 44,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-            color: Color.alphaBlend(theme.primary.withValues(alpha: 0.12), theme.headerBackground),
-            shape: BoxShape.circle),
-        child: ExcludeSemantics(
-          child: Text(title.trim().characters.firstOrNull ?? '',
-              // The circle is fixed-size: the initial doesn't scale with text.
-              textScaler: TextScaler.noScaling,
-              style: theme.text(size: 20, weight: FontWeight.w700, color: theme.primaryText)),
-        ),
-      );
+  Widget build(BuildContext context) {
+    final monogram = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration:
+          BoxDecoration(color: Color.alphaBlend(theme.primary.withValues(alpha: 0.12), on), shape: BoxShape.circle),
+      child: ExcludeSemantics(
+        child: Text(title.trim().characters.firstOrNull ?? '',
+            // The circle is fixed-size: the initial doesn't scale with text.
+            textScaler: TextScaler.noScaling,
+            style: theme.text(size: size * 0.45, weight: FontWeight.w700, color: theme.primaryText)),
+      ),
+    );
+    if (url == null) return monogram;
+    return ClipOval(
+      child: Image.network(
+        url!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).ceil(),
+        excludeFromSemantics: true,
+        loadingBuilder: (_, child, progress) => progress == null ? child : monogram,
+        errorBuilder: (_, __, ___) => monogram,
+      ),
+    );
+  }
 }
 
 /// The card at the top of the thread: a sparkle, a title and a subtitle.

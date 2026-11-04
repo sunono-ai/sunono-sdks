@@ -16,7 +16,11 @@ Map<String, dynamic> _row(String role, String text, String ref, int minute,
       'sender': role,
       'text': text,
       'msg_ref': ref,
-      'ts': DateTime(2026, 11, 4, 12, minute).toUtc().toIso8601String(),
+      // Today at 12:mm: the date pill reads «اليوم» / "Today" on any run day.
+      'ts': DateTime.now()
+          .copyWith(hour: 12, minute: minute, second: 0, millisecond: 0, microsecond: 0)
+          .toUtc()
+          .toIso8601String(),
       'products': products,
       'has_more': products.isNotEmpty,
     };

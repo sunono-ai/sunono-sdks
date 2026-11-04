@@ -34,6 +34,13 @@ class SunonoCopy {
   String get moreOptions => _t('خيارات أكثر', 'More options');
   String get talkToTeam => _t('احكي مع الفريق', 'Talk to our team');
 
+  // Bubbles
+  String get you => _t('أنت', 'You');
+  String get delivered => _t('تم الإرسال', 'Delivered');
+  String get sending => _t('عم نبعث', 'Sending');
+  String get copy => _t('نسخ', 'Copy');
+  String get copied => _t('تم النسخ', 'Copied');
+
   /// Sent (synthetic) by "Talk to our team": the server's escalate intent.
   String get escalatePhrase => _t('بدي أحكي مع حدا من الفريق', "I'd like to talk to someone from your team");
   String get welcomeTitle => _t('أهلاً، كيف بنقدر نساعدك؟', 'Hello, how can we help?');

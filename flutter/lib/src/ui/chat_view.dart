@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 
 import '../core/controller.dart';
 import '../core/format.dart';
@@ -180,6 +184,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
     final lang = _c.lang;
     final t = SunonoCopy.of(lang);
     final rtl = lang == 'ar';
+    final title = _c.config.title(lang) ?? t.title;
 
     Widget body;
     if (_c.status == ChatStatus.disabled || _c.updateRequired) {
@@ -191,6 +196,12 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       final starters = msgs.isEmpty && _c.status == ChatStatus.ready ? (_c.starterPrompts?[lang] ?? t.starters) : null;
       // The welcome is a permanent first bot bubble, not a message from the server.
       final welcome = ChatMessage(id: 'welcome', role: ChatRole.bot, text: _c.config.welcome(lang) ?? t.welcome);
+      final now = DateTime.now();
+      bool botish(ChatMessage m) => m.role == ChatRole.bot || m.role == ChatRole.staff;
+      // A date pill before the first message of each local day; the first
+      // day's sits above the welcome bubble (the mockup's order).
+      String? dayAbove(int i) =>
+          i == 0 || !sameDay(msgs[i].ts, msgs[i - 1].ts) ? formatDayLabel(msgs[i].ts, lang, now) : null;
       body = Column(children: [
         Expanded(
           child: ListView.builder(
@@ -216,8 +227,11 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                   controller: _c,
                   theme: theme,
                   lang: lang,
+                  title: title,
                   isLast: false,
                   timed: false,
+                  dayLabel: msgs.isEmpty ? null : dayAbove(0),
+                  avatar: msgs.isEmpty || !botish(msgs.first),
                   footer: starters == null || starters.isEmpty
                       ? null
                       : Padding(
@@ -236,7 +250,11 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                 controller: _c,
                 theme: theme,
                 lang: lang,
+                title: title,
                 isLast: index == msgs.length - 1,
+                dayLabel: index == 0 ? null : dayAbove(index),
+                // The avatar marks the last bubble of a run of bot/staff messages.
+                avatar: index == msgs.length - 1 || !botish(msgs[index + 1]),
                 onClose: widget.onClose,
               );
             },
@@ -294,7 +312,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
               ChatHeader(
                 theme: theme,
                 copy: t,
-                title: _c.config.title(lang) ?? t.title,
+                title: title,
                 avatarUrl: _c.config.avatarUrl,
                 status: _c.status == ChatStatus.disabled || _c.updateRequired
                     ? HeaderStatus.unavailable
@@ -316,23 +334,6 @@ class _SunonoChatViewState extends State<SunonoChatView> {
   }
 }
 
-/// The assistant's flat stand-in avatar: a sparkle on a [SunonoTheme.primary]
-/// tint (shown when the shop has no avatar, and beside "thinking").
-class _FlatAvatar extends StatelessWidget {
-  const _FlatAvatar({required this.theme, required this.size});
-  final SunonoTheme theme;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-            color: Color.alphaBlend(theme.primary.withValues(alpha: 0.12), theme.surface), shape: BoxShape.circle),
-        child: Icon(Icons.auto_awesome, size: size * 0.5, color: theme.primaryText),
-      );
-}
-
 /// One message plus whatever rides on it (cards, checkout, chips).
 class _MessageItem extends StatefulWidget {
   const _MessageItem({
@@ -341,8 +342,11 @@ class _MessageItem extends StatefulWidget {
     required this.controller,
     required this.theme,
     required this.lang,
+    required this.title,
     required this.isLast,
     this.timed = true,
+    this.dayLabel,
+    this.avatar = false,
     this.footer,
     this.onClose,
   });
@@ -352,11 +356,21 @@ class _MessageItem extends StatefulWidget {
   final SunonoTheme theme;
   final String lang;
 
+  /// The assistant's name: its bubbles' sender for screen readers and the avatar's initial.
+  final String title;
+
   /// The last message overall: the only one that offers Show more.
   final bool isLast;
 
   /// Whether the time shows under the bubble (not for the welcome).
   final bool timed;
+
+  /// A date pill above the message (the first of its day).
+  final String? dayLabel;
+
+  /// A bot/staff message that ends its group: the avatar sits beside it
+  /// (the others keep the same space so their bubbles line up).
+  final bool avatar;
 
   /// Extra content under the bubble (the starter chips).
   final Widget? footer;
@@ -390,12 +404,14 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
   @override
   Widget build(BuildContext context) {
     final curve = CurvedAnimation(parent: _in, curve: Curves.easeOutCubic);
+    Widget item = Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: _content());
+    if (widget.dayLabel != null) {
+      item = Column(children: [_DayPill(theme: widget.theme, label: widget.dayLabel!), item]);
+    }
     return FadeTransition(
       opacity: curve,
-      child: SlideTransition(
-        position: Tween(begin: const Offset(0, 0.12), end: Offset.zero).animate(curve),
-        child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: _content()),
-      ),
+      child:
+          SlideTransition(position: Tween(begin: const Offset(0, 0.12), end: Offset.zero).animate(curve), child: item),
     );
   }
 
@@ -403,6 +419,62 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
   Future<void> _cardTap(ProductCard p, String action, String Function(String, String) phrase, String lang) => widget
       .controller
       .send(phrase(p.title(lang), lang), synthetic: true, productSku: p.sku, tap: (action: action, ref: p.publicId));
+
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    // ponytail: SemanticsService.sendAnnouncement needs Flutter 3.35; the floor is 3.27.
+    // ignore: deprecated_member_use
+    unawaited(SemanticsService.announce(SunonoCopy.of(widget.lang).copied, Directionality.of(context)));
+  }
+
+  /// Long-press on a bubble: a one-item "Copy" menu anchored on it.
+  Future<void> _copyMenu(BuildContext bubble, String text) async {
+    final t = SunonoCopy.of(widget.lang);
+    final box = bubble.findRenderObject()! as RenderBox;
+    final overlay = Overlay.of(bubble).context.findRenderObject()! as RenderBox;
+    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final dir = Directionality.of(bubble);
+    final picked = await showMenu<bool>(
+      context: bubble,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      color: widget.theme.surface,
+      items: [
+        PopupMenuItem(
+          value: true,
+          // The menu opens in the app's overlay: keep the chat's direction.
+          child: Directionality(
+            textDirection: dir,
+            child: Row(children: [
+              Icon(Icons.copy_rounded, size: 20, color: widget.theme.primaryText),
+              const SizedBox(width: 12),
+              Text(t.copy, style: widget.theme.text()),
+            ]),
+          ),
+        ),
+      ],
+    );
+    if (picked == true) await _copy(text);
+  }
+
+  /// A bubble plus what sits under it, as one screen-reader node («sender,
+  /// text, time, status») with a Copy action; long-press opens the Copy menu.
+  Widget _readable(
+      {required String sender, required String text, required Widget bubble, Widget? under, required bool end}) {
+    final t = SunonoCopy.of(widget.lang);
+    return Semantics(
+      container: true,
+      label: sender,
+      customSemanticsActions: {CustomSemanticsAction(label: t.copy): () => _copy(text)},
+      child: Column(
+        crossAxisAlignment: end ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Builder(builder: (ctx) => GestureDetector(onLongPress: () => _copyMenu(ctx, text), child: bubble)),
+          if (under != null) Padding(padding: const EdgeInsetsDirectional.only(top: 4, start: 4, end: 4), child: under),
+        ],
+      ),
+    );
+  }
 
   Widget _content() {
     final m = widget.message;
@@ -412,14 +484,21 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
     final timed = widget.timed;
     final t = SunonoCopy.of(widget.lang);
     final contentLang = m.replyLang ?? widget.lang;
-    Widget time(AlignmentGeometry align) => Padding(
-          padding: const EdgeInsets.only(top: 2, left: 6, right: 6),
-          child: Align(
-            alignment: align,
-            child: Text(formatTime(m.ts, widget.lang),
-                textDirection: TextDirection.ltr, style: theme.text(size: 10, color: theme.muted)),
-          ),
-        );
+    final maxBubble = MediaQuery.sizeOf(context).width * 0.78;
+    final user = m.role == ChatRole.user;
+    final bubble = BoxDecoration(
+      color: user ? theme.userBubble : theme.botBubble,
+      // The tail corner points at the sender: start-bottom for the bot, end-bottom for the shopper.
+      borderRadius: BorderRadiusDirectional.only(
+        topStart: Radius.circular(theme.radius),
+        topEnd: Radius.circular(theme.radius),
+        bottomStart: Radius.circular(user ? theme.radius : 4),
+        bottomEnd: Radius.circular(user ? 4 : theme.radius),
+      ),
+    );
+    const pad = EdgeInsets.symmetric(horizontal: 14, vertical: 12);
+    final time = Text(formatTime(m.ts, widget.lang),
+        textDirection: TextDirection.ltr, style: theme.text(size: 11, color: theme.muted));
 
     if (m.role == ChatRole.system) {
       return Center(
@@ -432,11 +511,16 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
       );
     }
 
-    if (m.role == ChatRole.user) {
+    if (user) {
+      final status = m.delivered
+          ? Icon(Icons.done_all, size: 14, color: theme.primaryText, semanticLabel: t.delivered)
+          : c.isSending(m)
+              ? Icon(Icons.schedule_rounded, size: 14, color: theme.muted, semanticLabel: t.sending)
+              : null; // failed: the retry sits on the bot's error below
       return Align(
         alignment: AlignmentDirectional.centerEnd,
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
+          constraints: BoxConstraints(maxWidth: maxBubble),
           child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             if (m.localImage != null || m.imageUrl != null)
               Padding(
@@ -455,21 +539,25 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
                   ),
                 ),
               ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: theme.userBubble,
-                borderRadius: BorderRadiusDirectional.only(
-                  topStart: Radius.circular(theme.radius),
-                  topEnd: Radius.circular(theme.radius),
-                  bottomStart: Radius.circular(theme.radius),
-                  bottomEnd: const Radius.circular(4),
-                ),
+            _readable(
+              sender: t.you,
+              text: m.text,
+              end: true,
+              bubble: Container(
+                padding: pad,
+                decoration: bubble,
+                child: _BubbleText(
+                    text: m.text,
+                    theme: theme,
+                    color: theme.onUserBubble,
+                    uiRtl: widget.lang == 'ar',
+                    onLink: c.openUrl),
               ),
-              child: _BubbleText(
-                  text: m.text, theme: theme, color: theme.onUserBubble, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
+              under: Row(mainAxisSize: MainAxisSize.min, children: [
+                time,
+                if (status != null) ...[const SizedBox(width: 4), status],
+              ]),
             ),
-            time(AlignmentDirectional.centerEnd),
           ]),
         ),
       );
@@ -478,14 +566,34 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
     // Bot / staff.
     final children = <Widget>[];
     if (m.state == MessageState.thinking || m.state == MessageState.recovering) {
-      children.add(Row(mainAxisSize: MainAxisSize.min, children: [
-        _FlatAvatar(theme: theme, size: 26),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(m.state == MessageState.recovering ? t.recovering : stageLabel(m.stage, widget.lang),
-              style: theme.text(size: 13, color: theme.muted)),
+      final label = m.state == MessageState.recovering ? t.recovering : stageLabel(m.stage, widget.lang);
+      children.add(Semantics(
+        container: true,
+        label: label,
+        child: ExcludeSemantics(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              decoration: bubble,
+              // ponytail: static dots (reduced motion for everyone); animate when owners ask.
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                for (var i = 0; i < 3; i++)
+                  Container(
+                    width: 7,
+                    height: 7,
+                    margin: EdgeInsetsDirectional.only(start: i == 0 ? 0 : 4),
+                    decoration:
+                        BoxDecoration(color: theme.muted.withValues(alpha: 0.4 + 0.2 * i), shape: BoxShape.circle),
+                  ),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsetsDirectional.only(top: 4, start: 4, end: 4),
+              child: Text(label, style: theme.text(size: 11, color: theme.muted)),
+            ),
+          ]),
         ),
-      ]));
+      ));
     } else if (m.state == MessageState.failed) {
       children.add(Semantics(
         liveRegion: true,
@@ -501,12 +609,16 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
             theme: theme, label: t.retry, icon: Icons.refresh_rounded, onTap: c.busy ? null : () => c.retry(m)),
       ));
     } else {
-      if (m.role == ChatRole.staff) {
+      final staff = m.role == ChatRole.staff;
+      if (staff) {
         children.add(Padding(
-          padding: const EdgeInsetsDirectional.only(start: 6, bottom: 3),
-          child: Text(t.storeTeam, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.accentText)),
+          padding: const EdgeInsetsDirectional.only(start: 4, bottom: 3),
+          // The bubble's node already names the sender.
+          child: ExcludeSemantics(
+              child: Text(t.storeTeam, style: theme.text(size: 11, weight: FontWeight.w700, color: theme.accentText))),
         ));
       }
+      final hasText = m.text.trim().isNotEmpty;
       if (m.imageUrl != null) {
         children.add(_Zoomable(
           label: t.viewImage,
@@ -516,25 +628,24 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
             child: SizedBox(width: 200, child: boundedNetworkImage(context, m.imageUrl!, width: 200)),
           ),
         ));
+        if (timed && !hasText) {
+          children.add(Padding(padding: const EdgeInsetsDirectional.only(top: 4, start: 4), child: time));
+        }
       }
-      if (m.text.trim().isNotEmpty) {
-        children.add(Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: theme.botBubble,
-            border: m.role == ChatRole.staff ? Border.all(color: theme.primary.withValues(alpha: 0.3)) : null,
-            borderRadius: BorderRadiusDirectional.only(
-              topStart: Radius.circular(theme.radius),
-              topEnd: Radius.circular(theme.radius),
-              bottomEnd: Radius.circular(theme.radius),
-              bottomStart: const Radius.circular(4),
-            ),
+      if (hasText) {
+        final text = sanitizeReply(m.text);
+        children.add(_readable(
+          sender: staff ? t.storeTeam : widget.title,
+          text: text,
+          end: false,
+          bubble: Container(
+            constraints: BoxConstraints(maxWidth: maxBubble),
+            padding: pad,
+            decoration: bubble,
+            child: _BubbleText(text: text, theme: theme, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
           ),
-          child: _BubbleText(text: sanitizeReply(m.text), theme: theme, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
+          under: timed ? time : null,
         ));
-      }
-      if (timed && (m.text.trim().isNotEmpty || m.imageUrl != null)) {
-        children.add(time(AlignmentDirectional.centerStart));
       }
       if (m.products.isNotEmpty) {
         children.add(Padding(
@@ -590,13 +701,49 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
       }
       if (footer != null) children.add(footer);
     }
-    return Align(
-      alignment: AlignmentDirectional.centerStart,
-      child: ConstrainedBox(
-        constraints:
-            BoxConstraints(maxWidth: m.products.isEmpty ? MediaQuery.sizeOf(context).width * 0.82 : double.infinity),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+    // The avatar on the start side (RTL: right), or its width as a spacer.
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox.square(
+        dimension: _avatarSize,
+        child: widget.avatar
+            ? ShopAvatar(
+                theme: theme, title: widget.title, url: c.config.avatarUrl, size: _avatarSize, on: theme.botBubble)
+            : null,
       ),
+      const SizedBox(width: 8),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children)),
+    ]);
+  }
+}
+
+const _avatarSize = 32.0;
+
+/// «اليوم» centered between two hairlines: the first message of a day.
+class _DayPill extends StatelessWidget {
+  const _DayPill({required this.theme, required this.label});
+  final SunonoTheme theme;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Expanded(child: Container(height: 1, color: theme.outline));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(children: [
+        line,
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.6),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration:
+                BoxDecoration(color: theme.outline.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(999)),
+            child: Text(label,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.text(size: 12, color: theme.muted)),
+          ),
+        ),
+        line,
+      ]),
     );
   }
 }
@@ -612,9 +759,17 @@ class _BubbleText extends StatelessWidget {
 
   static final _url = RegExp(r'https://[^\s<>"]+');
 
+  /// A `+` number or digit groups split by spaces/dashes («+962 79 123 4567»):
+  /// the runs RTL prose would reorder.
+  static final _number = RegExp(r'\+\d(?:[\d \-]*\d)?|\d+(?:[ \-]+\d+)+');
+
   @override
   Widget build(BuildContext context) {
     final style = theme.text(size: 15, height: 1.45, color: color);
+    final rtl = isRtlText(text, fallbackRtl: uiRtl);
+    // In RTL prose the groups of «+962 79 123 4567» would read right to left:
+    // an LTR isolate keeps each number in its own order.
+    String plain(String s) => rtl ? s.replaceAllMapped(_number, (m) => '\u2066${m[0]}\u2069') : s;
     final spans = <InlineSpan>[];
     var last = 0;
     for (final m in _url.allMatches(text)) {
@@ -622,7 +777,7 @@ class _BubbleText extends StatelessWidget {
       final url = trimLinkTail(m.group(0)!);
       // Unsafe (hidden format chars, non-ASCII host): stays plain text.
       if (!isSafeLink(url)) continue;
-      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
+      if (m.start > last) spans.add(TextSpan(text: plain(text.substring(last, m.start))));
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.baseline,
         baseline: TextBaseline.alphabetic,
@@ -639,11 +794,9 @@ class _BubbleText extends StatelessWidget {
       ));
       last = m.start + url.length;
     }
-    if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
-    return Text.rich(
-      TextSpan(style: style, children: spans),
-      textDirection: isRtlText(text, fallbackRtl: uiRtl) ? TextDirection.rtl : TextDirection.ltr,
-    );
+    if (last < text.length) spans.add(TextSpan(text: plain(text.substring(last))));
+    return Text.rich(TextSpan(style: style, children: spans),
+        textDirection: rtl ? TextDirection.rtl : TextDirection.ltr);
   }
 }
 
