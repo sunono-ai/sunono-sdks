@@ -149,6 +149,33 @@ void main() {
     expect(legacy.pausedAt, isNull);
   });
 
+  test('app history v1.2: every reply row carries its action', () {
+    final f = fixture('history_app.json');
+    final e = f['expect'] as Map<String, dynamic>;
+    final rows = History.fromJson(f['response'], apiOrigin: f['api_origin'] as String).rows;
+    expect(rows, hasLength(e['rows'] as int));
+    String? kind(Checkout? c) => switch (c) {
+          CheckoutCollect() => 'collect',
+          CheckoutReview(amend: false) => 'confirm',
+          CheckoutReview() => 'amend',
+          CheckoutPlaced() => 'placed',
+          null => null,
+        };
+    expect(rows.map((r) => kind(r.checkout)).toList(), e['checkouts']);
+    expect(rows.map((r) => r.orderIds?.number).toList(), e['order_ids_number']);
+    expect(rows.map((r) => r.replyLang).toList(), e['reply_lang']);
+    expect(rows[4].handoff?.target, e['row4_handoff_target']);
+    expect(rows[4].handoffUrl, e['row4_handoff_url']);
+    expect(rows[5].imageUrl, e['row5_image']);
+    expect(rows[6].audio?.url, e['row6_audio_url']);
+    expect(rows[6].audio?.durationMs, e['row6_audio_duration_ms']);
+    expect(rows[7].products, hasLength(e['row7_products'] as int));
+    expect(rows[7].hasMore, e['row7_has_more']);
+    // An older server sends no `action`: rows parse as in 0.2.
+    final old = History.fromJson(fixture('history_v2.json')['response']).rows;
+    expect(old.map((r) => (r.checkout, r.orderIds, r.replyLang, r.audio)).toSet(), {(null, null, null, null)});
+  });
+
   test('sse streams', () async {
     final e = fixture('sse_expect.json');
     final photo = await parseSse(sseBytes('stream_photo.sse')).toList();

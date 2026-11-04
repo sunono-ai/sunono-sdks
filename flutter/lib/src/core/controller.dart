@@ -60,7 +60,8 @@ class ChatMessage {
     this.products = const [],
     this.hasMore = false,
     this.checkout,
-    this.handoffUrl,
+    CheckoutHandoff? handoff,
+    String? handoffUrl,
     this.orderIds,
     this.msgRef,
     this.clientRef,
@@ -70,7 +71,8 @@ class ChatMessage {
     this.replyLang,
     this.errorCode,
     this.delivered = false,
-  }) : ts = ts ?? DateTime.now();
+  })  : ts = ts ?? DateTime.now(),
+        handoff = handoff ?? (handoffUrl == null ? null : (url: handoffUrl, target: 'checkout'));
 
   final String id;
   final ChatRole role;
@@ -80,7 +82,12 @@ class ChatMessage {
   List<ProductCard> products;
   bool hasMore;
   Checkout? checkout;
-  String? handoffUrl;
+
+  /// Where "Complete order" goes: the host cart (`target: 'cart'`) or the site checkout.
+  CheckoutHandoff? handoff;
+
+  /// The site checkout URL of [handoff], if any.
+  String? get handoffUrl => handoff?.url;
 
   /// Ids of the order this reply is about (placed, or its status).
   OrderIds? orderIds;
@@ -920,7 +927,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       ..products = r.products
       ..hasMore = r.hasMore
       ..checkout = r.checkout
-      ..handoffUrl = r.handoffUrl
+      ..handoff = r.handoff
       ..orderIds = r.orderIds
       ..msgRef = r.msgRef
       ..replyLang = r.replyLang
@@ -1004,7 +1011,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
         imageUrl: r.imageUrl,
         products: r.products,
         hasMore: r.hasMore,
-        handoffUrl: r.handoffUrl,
+        checkout: r.checkout,
+        handoff: r.handoff,
+        orderIds: r.orderIds,
+        replyLang: r.replyLang,
         msgRef: r.msgRef,
         ts: r.ts,
         delivered: true,

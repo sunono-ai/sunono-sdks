@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:sunono/src/core/format.dart';
+import 'package:sunono/src/ui/cards.dart' show ProductTile;
 import 'package:sunono/sunono.dart';
 
 import 'fake_server.dart';
@@ -112,6 +114,21 @@ void main() {
       expect(only.welcome('en'), isNull);
       expect(const ShopConfig(welcomeEn: 'Hi').welcome('ar'), isNull);
     });
+  });
+
+  testWidgets('a staging-shaped app history restores its cards, the 5 products and Show more', (tester) async {
+    final f = jsonDecode(File('../protocol/fixtures/history_app.json').readAsStringSync()) as Map<String, dynamic>;
+    server.historyBody = f['response'];
+    await tester.pumpWidget(app(SunonoChatView(controller: make('ar'))));
+    await settle(tester);
+    expect(c.messages.where((m) => m.checkout != null), hasLength(3), reason: 'collect, confirm, placed');
+    expect(c.messages.where((m) => m.orderIds != null).single.orderIds!.number, '1001');
+    expect(c.messages.where((m) => m.handoff?.target == 'cart'), hasLength(1));
+    expect(c.messages.last.products, hasLength(5));
+    expect(find.byType(ProductTile), findsNWidgets(5));
+    expect(find.text('شوف أكثر'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
   });
 
   group('pause pills', () {

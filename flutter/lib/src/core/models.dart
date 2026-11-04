@@ -398,12 +398,37 @@ class CheckoutPlaced extends Checkout {
 /// `action_data.order_ids` (PROTOCOL §4.1).
 class OrderIds {
   const OrderIds({this.publicId, this.number, this.storeOrderId, this.source});
+
+  static OrderIds? _parse(Object? raw) {
+    final ids = _map(raw);
+    if (ids.isEmpty) return null;
+    String? s(Object? v) => v == null ? null : _str('$v');
+    return OrderIds(
+        publicId: s(ids['public_id']),
+        number: s(ids['number']),
+        storeOrderId: s(ids['store_order_id']),
+        source: s(ids['source']));
+  }
+
   final String? publicId;
   final String? number;
   final String? storeOrderId;
 
   /// `chat` or `storefront`.
   final String? source;
+}
+
+/// `checkout_handoff`: finish the order in the host. `target` is `cart` (the
+/// host's cart page, app channel: [url] may be null) or `checkout` (the site
+/// checkout at the https [url]).
+typedef CheckoutHandoff = ({String? url, String target});
+
+CheckoutHandoff? _handoff(Object? raw) {
+  final h = _map(raw);
+  final u = _str(h['url']);
+  final url = u != null && u.startsWith('https://') ? u : null;
+  final target = _str(h['target']) == 'cart' ? 'cart' : 'checkout';
+  return url != null || target == 'cart' ? (url: url, target: target) : null;
 }
 
 /// The final payload of a turn: `/chat` JSON or the `done` frame (PROTOCOL §4.1).
@@ -417,7 +442,7 @@ class TurnResult {
     this.cartPresent = false,
     this.cartMutated = false,
     this.checkout,
-    this.handoffUrl,
+    this.handoff,
     this.replyLang,
     this.paused = false,
     this.blocked = false,
@@ -429,8 +454,6 @@ class TurnResult {
   factory TurnResult.fromJson(Map<String, dynamic> j) {
     final a = _map(j['action_data']);
     final cartRaw = a['cart_summary'] ?? a['cart'];
-    final handoff = _str(_map(a['checkout_handoff'])['url']);
-    final ids = _map(a['order_ids']);
     return TurnResult(
       reply: _as<String>(j['reply']) ?? '',
       msgRef: _str(j['msg_ref']),
@@ -440,20 +463,13 @@ class TurnResult {
       cartPresent: cartRaw is Map,
       cartMutated: _map(a['cart_sync'])['mutated'] == true,
       checkout: Checkout.fromActionData(a),
-      handoffUrl: handoff != null && handoff.startsWith('https://') ? handoff : null,
+      handoff: _handoff(a['checkout_handoff']),
       replyLang: _str(a['reply_lang']),
       paused: j['paused'] == true,
       blocked: j['blocked'] == true,
       typingHint: j['typing_hint'] is bool ? j['typing_hint'] as bool : null,
       relink: _on(a['cart_relink']),
-      orderIds: ids.isEmpty
-          ? null
-          : OrderIds(
-              publicId: _str(ids['public_id']),
-              number: ids['number'] == null ? null : _str('${ids['number']}'),
-              storeOrderId: ids['store_order_id'] == null ? null : _str('${ids['store_order_id']}'),
-              source: _str(ids['source']),
-            ),
+      orderIds: OrderIds._parse(a['order_ids']),
     );
   }
 
@@ -469,7 +485,8 @@ class TurnResult {
   /// The bot changed a synced storefront cart: the host should refresh.
   final bool cartMutated;
   final Checkout? checkout;
-  final String? handoffUrl;
+  final CheckoutHandoff? handoff;
+  String? get handoffUrl => handoff?.url;
   final String? replyLang;
   final bool paused;
   final bool blocked;
@@ -557,7 +574,11 @@ class HistoryRow {
     this.imageUrl,
     this.msgRef,
     this.ts,
-    this.handoffUrl,
+    this.handoff,
+    this.checkout,
+    this.orderIds,
+    this.replyLang,
+    this.audio,
   });
 
   factory HistoryRow.fromJson(Map<String, dynamic> j, {String? apiOrigin}) {
@@ -567,18 +588,30 @@ class HistoryRow {
         : sender == 'staff'
             ? 'staff'
             : 'bot';
-    var image = _str(j['image']);
-    if (image != null && image.startsWith('/') && apiOrigin != null) image = '$apiOrigin$image';
-    final handoff = _str(_map(j['checkout_handoff'])['url']);
+    String? media(Object? v) {
+      final u = _str(v);
+      final abs = u != null && u.startsWith('/') && apiOrigin != null ? '$apiOrigin$u' : u;
+      return _isHttpUrl(abs) ? abs : null;
+    }
+
+    // v1.2 app rows: the live turn's action keys, parsed exactly like a turn.
+    // An older server sends no `action`: the row is as in 0.2.
+    final a = _map(j['action']);
+    final audio = _map(j['audio']);
+    final audioUrl = media(audio['url']);
     return HistoryRow(
       role: role,
       text: _as<String>(j['text']) ?? '',
       products: _maps(j['products']).map(ProductCard.fromJson).where((p) => p.publicId.isNotEmpty).toList(),
       hasMore: j['has_more'] == true,
-      imageUrl: _isHttpUrl(image) ? image : null,
+      imageUrl: media(j['image']),
       msgRef: _str(j['msg_ref']),
       ts: DateTime.tryParse(_as<String>(j['ts']) ?? ''),
-      handoffUrl: handoff != null && handoff.startsWith('https://') ? handoff : null,
+      handoff: _handoff(a['checkout_handoff'] ?? j['checkout_handoff']),
+      checkout: Checkout.fromActionData(a),
+      orderIds: OrderIds._parse(a['order_ids']),
+      replyLang: _str(a['reply_lang']),
+      audio: audioUrl == null ? null : (url: audioUrl, durationMs: _int(audio['duration_ms'])),
     );
   }
 
@@ -590,7 +623,14 @@ class HistoryRow {
   final String? imageUrl;
   final String? msgRef;
   final DateTime? ts;
-  final String? handoffUrl;
+  final CheckoutHandoff? handoff;
+  String? get handoffUrl => handoff?.url;
+  final Checkout? checkout;
+  final OrderIds? orderIds;
+  final String? replyLang;
+
+  /// A voice note (`audio`, v1.2); [text] holds its transcript.
+  final ({String url, int? durationMs})? audio;
 }
 
 class History {
