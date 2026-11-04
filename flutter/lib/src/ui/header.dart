@@ -183,6 +183,8 @@ class WelcomeCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Color.alphaBlend(theme.primary.withValues(alpha: 0.06), theme.chatBackground),
           borderRadius: BorderRadius.circular(16),
+          // Dark: the fill is barely above the page, so the edge carries the card.
+          border: theme.isDark ? Border.all(color: theme.outline) : null,
         ),
         child: IntrinsicHeight(
           child: Row(children: [

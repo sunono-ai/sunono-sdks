@@ -73,6 +73,8 @@ class SunonoTheme {
       surface: surface,
       onSurface: c.onSurface,
       muted: readableOn(c.onSurfaceVariant, [chat, surface]),
+      // The light-mode green is 3:1 on a dark page: use the dark-mode one.
+      success: dark ? const Color(0xFF3DD69A) : const Color(0xFF078B5B),
       danger: c.error,
       fontFamily: t.textTheme.bodyMedium?.fontFamily,
       fontFamilyFallback: t.textTheme.bodyMedium?.fontFamilyFallback,
@@ -188,6 +190,13 @@ class SunonoTheme {
 
   /// Hairlines and borders (header bottom, composer, cards).
   Color get outline => _outline ?? Color.alphaBlend(onSurface.withValues(alpha: 0.12), surface);
+
+  /// Whether the page is dark (the chat page, not the host chrome around it).
+  bool get isDark => chatBackground.computeLuminance() < 0.5;
+
+  /// The border of inputs and round buttons: [outline], and in dark mode
+  /// lifted to 3:1 so a field's edge is visible (WCAG 1.4.11).
+  Color get controlOutline => isDark ? readableOn(outline, [surface, chatBackground], min: 3) : outline;
 
   /// The "online" status dot.
   Color get online => _online ?? success;

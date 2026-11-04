@@ -49,6 +49,19 @@ void main() {
             expect(contrastRatio(t.onSurface, bg), greaterThanOrEqualTo(4.5), reason: '$why onSurface');
           }
           expect(contrastRatio(t.chipOutline, t.chatBackground), greaterThanOrEqualTo(3), reason: '$why chip');
+          for (final bg in [t.surface, t.chatBackground, t.botBubble]) {
+            if (!t.isDark) continue; // ponytail: light success is 4.33:1 on white; dark is this task's scope
+            expect(contrastRatio(t.danger, bg), greaterThanOrEqualTo(4.5), reason: '$why danger on $bg');
+            expect(contrastRatio(t.success, bg), greaterThanOrEqualTo(4.5), reason: '$why success on $bg');
+          }
+          if (t.isDark) {
+            final pill = Color.alphaBlend(t.outline.withValues(alpha: 0.4), t.chatBackground);
+            expect(contrastRatio(t.muted, pill), greaterThanOrEqualTo(4.5), reason: '$why date pill');
+            for (final bg in [t.surface, t.chatBackground]) {
+              expect(contrastRatio(t.controlOutline, bg), greaterThanOrEqualTo(3), reason: '$why field border on $bg');
+            }
+            expect(contrastRatio(t.botBubble, t.chatBackground), greaterThan(1.05), reason: '$why bubble above page');
+          }
           expect(contrastRatio(t.onPrimary, t.primary), greaterThanOrEqualTo(4.5), reason: '$why onPrimary');
         }
       });

@@ -98,7 +98,7 @@ class Composer extends StatelessWidget {
         tooltip: label,
         style: IconButton.styleFrom(
           fixedSize: const Size.square(48),
-          side: BorderSide(color: theme.outline),
+          side: BorderSide(color: theme.controlOutline),
           foregroundColor: theme.onSurface,
         ),
         icon: Icon(icon, color: theme.onSurface),
@@ -145,7 +145,7 @@ class Composer extends StatelessWidget {
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       enabledBorder:
-                          OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: theme.outline)),
+                          OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: theme.controlOutline)),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: radius, borderSide: BorderSide(color: theme.primaryText, width: 1.5)),
                     ),
@@ -244,7 +244,7 @@ class Composer extends StatelessWidget {
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             backgroundColor: theme.surface,
                             foregroundColor: theme.onSurface,
-                            side: BorderSide(color: theme.outline),
+                            side: BorderSide(color: theme.controlOutline),
                           ),
                           iconSize: 14,
                           tooltip: copy.removePhoto,
