@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/host.dart';
 import 'copy.dart';
@@ -73,6 +74,24 @@ class Composer extends StatelessWidget {
     if (photo == true) onPickPhoto?.call();
   }
 
+  /// Hardware keyboard: Enter sends, Shift+Enter breaks the line. An IME
+  /// still composing (e.g. CJK) keeps its Enter.
+  KeyEventResult _onKey(FocusNode _, KeyEvent e) {
+    if (e is KeyUpEvent ||
+        (e.logicalKey != LogicalKeyboardKey.enter && e.logicalKey != LogicalKeyboardKey.numpadEnter) ||
+        controller.value.composing.isValid) {
+      return KeyEventResult.ignored;
+    }
+    if (HardwareKeyboard.instance.isShiftPressed) {
+      final v = controller.value;
+      final at = v.selection.isValid ? v.selection : TextSelection.collapsed(offset: v.text.length);
+      controller.value = v.replaced(at, '\n');
+    } else if (e is KeyDownEvent) {
+      onSend();
+    }
+    return KeyEventResult.handled;
+  }
+
   /// A 48 dp outlined circle (`+`, mic).
   Widget _outlined(IconData icon, String label, VoidCallback onPressed) => IconButton.outlined(
         onPressed: onPressed,
@@ -103,28 +122,33 @@ class Composer extends StatelessWidget {
                 const SizedBox(width: 8),
               ],
               Expanded(
-                child: TextField(
-                  controller: controller,
-                  focusNode: focus,
-                  autofocus: autofocus,
-                  minLines: 1,
-                  maxLines: 5, // then it scrolls
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => onSend(),
-                  style: theme.text(size: 15),
-                  cursorColor: theme.primaryText,
-                  decoration: InputDecoration(
-                    hintText: hint,
-                    hintMaxLines: 1, // a wrapped hint at 200% text would eat the screen
-                    hintStyle: theme.text(size: 15, color: theme.muted),
-                    filled: true,
-                    fillColor: theme.surface,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    enabledBorder:
-                        OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: theme.outline)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: radius, borderSide: BorderSide(color: theme.primaryText, width: 1.5)),
+                child: Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  onKeyEvent: _onKey,
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focus,
+                    autofocus: autofocus,
+                    minLines: 1,
+                    maxLines: 5, // then it scrolls
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => onSend(),
+                    style: theme.text(size: 15),
+                    cursorColor: theme.primaryText,
+                    decoration: InputDecoration(
+                      hintText: hint,
+                      hintMaxLines: 1, // a wrapped hint at 200% text would eat the screen
+                      hintStyle: theme.text(size: 15, color: theme.muted),
+                      filled: true,
+                      fillColor: theme.surface,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      enabledBorder:
+                          OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: theme.outline)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: radius, borderSide: BorderSide(color: theme.primaryText, width: 1.5)),
+                    ),
                   ),
                 ),
               ),

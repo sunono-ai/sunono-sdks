@@ -60,15 +60,89 @@ void main() {
         // isSemantics replaces it from Flutter 3.40; the floor is 3.27.
         // ignore: deprecated_member_use
         containsSemantics(tooltip: 'Send', isButton: true, isEnabled: true));
-    Focus.of(tester.element(send)).requestFocus();
+    // From the input, Tab reaches send (the next stop), then Enter presses it.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     expect(Focus.of(tester.element(send)).hasPrimaryFocus, isTrue);
+    expect(server.count('/chat'), 0);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await settle(tester);
     expect(server.bodies['/chat']!.single, contains('hello'));
     await finish(tester);
     semantics.dispose();
   });
+
+  testWidgets('hardware keyboard in the input: Shift+Enter breaks the line, Enter sends', (tester) async {
+    await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'line one');
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'line one\n');
+    expect(server.count('/chat'), 0);
+    tester.testTextInput.enterText('line one\nline two');
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settle(tester);
+    expect(server.bodies['/chat']!.single, contains(r'line one\nline two'));
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, isEmpty);
+    await finish(tester);
+  });
+
+  /// Real metrics as dart:ui reports them: `padding = max(0, viewPadding -
+  /// viewInsets)`, so a raised keyboard absorbs the home indicator.
+  void phone(WidgetTester tester, {required bool keyboard}) {
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3;
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34 * 3);
+    tester.view.padding = FakeViewPadding(bottom: keyboard ? 0 : 34 * 3);
+    tester.view.viewInsets = FakeViewPadding(bottom: keyboard ? 300 * 3 : 0);
+    addTearDown(tester.view.reset);
+  }
+
+  // The send button's bottom: the bar's 8 dp padding above the keyboard or the indicator.
+  double sendBottom(WidgetTester tester) =>
+      tester.getBottomLeft(find.widgetWithIcon(IconButton, Icons.arrow_upward_rounded)).dy;
+
+  for (final keyboard in [true, false]) {
+    final edge = keyboard ? 844.0 - 300 : 844.0 - 34;
+    testWidgets('full screen under a Scaffold, keyboard ${keyboard ? 'up: flush on it' : 'down: clears the indicator'}',
+        (tester) async {
+      phone(tester, keyboard: keyboard);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SunonoChatView(controller: make('en')))));
+      await settle(tester);
+      expect(sendBottom(tester), edge - 8);
+      await finish(tester);
+    });
+
+    testWidgets('Sunono.open sheet, keyboard ${keyboard ? 'up: flush on it' : 'down: clears the indicator'}',
+        (tester) async {
+      phone(tester, keyboard: keyboard);
+      c = Sunono.init(
+        shopKey: 'pk_test',
+        apiBaseUrl: 'https://api.test/api',
+        appOrigin: 'https://shop.example',
+        storage: MemoryStorage(),
+        locale: 'en',
+        httpClientFactory: () => MockClient.streaming(server.handle),
+      );
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: Builder(
+                  builder: (context) =>
+                      TextButton(onPressed: () => Sunono.open(context), child: const Text('chat'))))));
+      await tester.tap(find.text('chat'));
+      await settle(tester);
+      expect(sendBottom(tester), edge - 8);
+      // Sunono owns this controller: the next init disposes it.
+      await tester.pumpWidget(const SizedBox());
+      c.suspend();
+      server.close();
+    });
+  }
 
   testWidgets('no pickImage: no + at all; with one, + opens the sheet with Photo', (tester) async {
     await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
