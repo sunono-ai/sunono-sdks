@@ -67,9 +67,9 @@ The assistant hands navigation back to your app through `onIntent`. Return `true
 
 | Intent | When | If you return `false` / don't handle it |
 |---|---|---|
-| `OpenProductIntent(productId, sku, url, title)` | The shopper taps a product card | The assistant answers with the product's details in the chat |
-| `OpenCartIntent` | The shopper taps the cart bar | The assistant shows the cart in the chat |
-| `CheckoutIntent(url)` | The shopper taps the checkout hand-off button | Nothing opens; an `ErrorEvent(UnhandledIntent)` is emitted and the sheet stays |
+| `OpenProductIntent(productId, sku, url, title)` | The shopper taps a product card, or taps **Add** while no storefront cart is linked (no `cartBridge`, or its bind failed: the assistant only adds to a linked cart) | The assistant answers with the product's details in the chat |
+| `OpenCartIntent` | The shopper taps the cart bar, or «افتح السلة» / "Open cart" when the assistant hands checkout to your cart page | Cart bar: the assistant shows the cart in the chat. Open cart: a `CheckoutIntent()` (no URL) when `nativeCheckout`, otherwise an `ErrorEvent(UnhandledIntent)` and the sheet stays |
+| `CheckoutIntent(url)` | The shopper taps a site checkout hand-off button, or you declined Open cart with `nativeCheckout` (then `url` is null) | Nothing opens; an `ErrorEvent(UnhandledIntent)` is emitted and the sheet stays |
 | `OpenUrlIntent(url)` | The shopper taps a link in a reply (https links only) | Nothing opens; an `ErrorEvent(UnhandledIntent)` is emitted |
 | `OpenOrderIntent(number, storeOrderId, publicId, source)` | The shopper taps "Order details" on a placed or tracked order | For a chat order, the assistant answers with the order's status; otherwise an `ErrorEvent(UnhandledIntent)` is emitted |
 

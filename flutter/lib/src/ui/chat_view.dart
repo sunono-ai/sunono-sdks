@@ -709,7 +709,14 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
             onOpen: (p) {
               if (!c.openProduct(p)) _cardTap(p, 'product_detail', detailsPhrase, contentLang);
             },
-            onAdd: (p) => _cardTap(p, 'add_to_cart', addToCartPhrase, contentLang),
+            onAdd: (p) {
+              // No linked cart (D2): the bot can't add, the product page can.
+              if (!c.addOpensProduct) {
+                _cardTap(p, 'add_to_cart', addToCartPhrase, contentLang);
+              } else if (!c.openProduct(p)) {
+                _cardTap(p, 'product_detail', detailsPhrase, contentLang);
+              }
+            },
             onDetails: (p) => _cardTap(p, 'product_detail', detailsPhrase, contentLang),
           ),
         ));
@@ -736,14 +743,16 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
               onTap: c.busy ? null : () => c.openOrder(m.orderIds!)),
         ));
       }
-      if (m.handoffUrl != null) {
+      final h = m.handoff;
+      if (h != null) {
+        // Target cart (app checkout, D1) wins over any site url.
         children.add(Padding(
           padding: const EdgeInsets.only(top: 10),
           child: HandoffButton(
             theme: theme,
-            label: t.completeOrder(c.nativeCheckout),
+            label: h.target == 'cart' ? t.openCart : t.completeOrder(c.nativeCheckout),
             onTap: () {
-              if (c.checkout(m.handoffUrl)) widget.onClose?.call();
+              if (c.checkout(h.url, target: h.target)) widget.onClose?.call();
             },
           ),
         ));

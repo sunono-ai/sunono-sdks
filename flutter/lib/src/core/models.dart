@@ -448,6 +448,7 @@ class TurnResult {
     this.blocked = false,
     this.typingHint,
     this.relink = false,
+    this.cartUnlinked = false,
     this.orderIds,
   });
 
@@ -469,6 +470,7 @@ class TurnResult {
       blocked: j['blocked'] == true,
       typingHint: j['typing_hint'] is bool ? j['typing_hint'] as bool : null,
       relink: _on(a['cart_relink']),
+      cartUnlinked: _str(a['status']) == 'app_cart_unlinked' || _on(a['app_cart_unlinked']),
       orderIds: OrderIds._parse(a['order_ids']),
     );
   }
@@ -494,6 +496,10 @@ class TurnResult {
 
   /// The storefront cart link was dropped: re-bind (PROTOCOL §8).
   final bool relink;
+
+  /// The bot refused an add: this app shopper has no linked storefront cart
+  /// (`status: app_cart_unlinked`, D2). Card Add opens the product until a link.
+  final bool cartUnlinked;
   final OrderIds? orderIds;
 
   /// Paused/blocked/silenced with nothing to say: render nothing, no retry.

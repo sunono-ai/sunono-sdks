@@ -100,6 +100,7 @@ class SunonoCopy {
   String get cart => _t('السلة', 'Cart');
   String completeOrder(bool native) =>
       native ? _t('كمّل الطلب', 'Complete your order') : _t('كمّل الطلب بالموقع', 'Complete order on the site');
+  String get openCart => _t('افتح السلة', 'Open cart');
   String get orderDetails => _t('تفاصيل الطلب', 'Order details');
   String get collectTitle => _t('بيانات التوصيل', 'Delivery details');
   String get confirmTitle => _t('تأكيد الطلب', 'Confirm your order');

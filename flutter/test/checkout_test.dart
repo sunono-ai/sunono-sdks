@@ -390,6 +390,150 @@ void main() {
     });
   });
 
+  group('handoff target cart (D1)', () {
+    const cart = {
+      'checkout_handoff': {'target': 'cart'},
+    };
+    const linked = {
+      'checkout_handoff': {'target': 'cart', 'url': 'https://shop.example/checkout/'},
+    };
+
+    for (final (lang, label) in [('ar', 'افتح السلة'), ('en', 'Open cart')]) {
+      testWidgets('$lang: «$label» even with nativeCheckout', (tester) async {
+        await turn(tester, lang, linked, native: true);
+        expect(find.text(label), findsOneWidget);
+        expect(find.textContaining('كمّل الطلب'), findsNothing);
+        expect(find.textContaining('Complete'), findsNothing);
+        await finish(tester);
+      });
+    }
+
+    testWidgets('no url: tap opens the host cart, the sheet closes', (tester) async {
+      await turn(tester, 'en', cart);
+      await tester.tap(find.text('Open cart'));
+      await tester.pump();
+      expect(intents.single, isA<OpenCartIntent>());
+      expect(closes, 1);
+      expect(sent(), hasLength(1), reason: 'nothing is sent to the chat');
+      await finish(tester);
+    });
+
+    testWidgets('a linked shopper with the site url: still the host cart, never the url', (tester) async {
+      await turn(tester, 'en', linked, native: true);
+      await tester.tap(find.text('Open cart'));
+      await tester.pump();
+      expect(intents.single, isA<OpenCartIntent>());
+      expect(closes, 1);
+      await finish(tester);
+    });
+
+    testWidgets('host declines the cart, nativeCheckout: its checkout screen, without the url', (tester) async {
+      final asked = <SunonoIntent>[];
+      await turn(tester, 'en', linked, native: true);
+      c.onIntent = (i) {
+        asked.add(i);
+        return i is CheckoutIntent;
+      };
+      await tester.tap(find.text('Open cart'));
+      await tester.pump();
+      expect(asked.map((i) => i.runtimeType), [OpenCartIntent, CheckoutIntent]);
+      expect((asked.last as CheckoutIntent).url, isNull);
+      expect(closes, 1);
+      await finish(tester);
+    });
+
+    testWidgets('host declines, no nativeCheckout: UnhandledIntent(OpenCartIntent), no checkout, sheet stays',
+        (tester) async {
+      handled = false;
+      await turn(tester, 'en', linked);
+      await tester.tap(find.text('Open cart'));
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      expect(intents.single, isA<OpenCartIntent>());
+      expect(errors().whereType<UnhandledIntent>().single.intent, isA<OpenCartIntent>());
+      expect(closes, 0);
+      await finish(tester);
+    });
+
+    testWidgets('target checkout + url (web-parity server): the site checkout as before', (tester) async {
+      await turn(tester, 'en', {
+        'checkout_handoff': {'target': 'checkout', 'url': 'https://shop.example/checkout/'},
+      });
+      await tester.tap(find.text('Complete order on the site'));
+      await tester.pump();
+      expect((intents.single as CheckoutIntent).url, 'https://shop.example/checkout/');
+      expect(closes, 1);
+      await finish(tester);
+    });
+
+    testWidgets('restored (history): the same host cart', (tester) async {
+      server.historyRows = [
+        _userRow,
+        _replyRow({...linked, 'reply_lang': 'ar'})
+      ];
+      await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true, size: Size(400, 800)),
+          child: Scaffold(body: SunonoChatView(controller: make('ar'), onClose: () => closes++)),
+        ),
+      ));
+      await settle(tester);
+      await tester.tap(find.text('افتح السلة'));
+      await tester.pump();
+      expect(intents.single, isA<OpenCartIntent>());
+      expect(closes, 1);
+      expect(sent(), isEmpty);
+      await finish(tester);
+    });
+  });
+
+  group('card Add without a linked cart (D2)', () {
+    const cards = {
+      'products': [
+        {'public_id': 'p1', 'sku': 'S1', 'title_en': 'Coffee', 'price_jod': 8},
+      ],
+    };
+
+    testWidgets('no bridge: Add opens the product page, nothing is sent', (tester) async {
+      await turn(tester, 'en', cards);
+      await tester.tap(find.text('Add to cart'));
+      await settle(tester);
+      final i = intents.single as OpenProductIntent;
+      expect((i.productId, i.sku), ('p1', 'S1'));
+      expect(sent(), hasLength(1));
+      await finish(tester);
+    });
+
+    testWidgets('no bridge, host declines: the bot shows the product (no add tap)', (tester) async {
+      await turn(tester, 'en', cards);
+      handled = false;
+      await tester.tap(find.text('Add to cart'));
+      await settle(tester);
+      expect(sent(), hasLength(2));
+      expect(sent().last, contains('"product_detail"'));
+      expect(sent().last, isNot(contains('add_to_cart')));
+      await finish(tester);
+    });
+
+    testWidgets('a bridge, bound: Add sends the add tap (unchanged)', (tester) async {
+      await turn(tester, 'en', cards, bridge: true);
+      await tester.tap(find.text('Add to cart'));
+      await settle(tester);
+      expect(intents, isEmpty);
+      expect(sent().last, contains('"add_to_cart"'));
+      await finish(tester);
+    });
+
+    testWidgets('the server refuses an add as unlinked: the next Add opens the product', (tester) async {
+      await turn(tester, 'en', {...cards, 'status': 'app_cart_unlinked'}, bridge: true);
+      await tester.tap(find.text('Add to cart'));
+      await settle(tester);
+      expect(intents.single, isA<OpenProductIntent>());
+      expect(sent(), hasLength(1));
+      await finish(tester);
+    });
+  });
+
   group('order details', () {
     testWidgets('placed card shows the button; handled tap hands over every id', (tester) async {
       await turn(tester, 'ar', _placed);
@@ -501,16 +645,27 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('not bound: asks the assistant, never the host', (tester) async {
+    testWidgets('not bound: the host cart first, no synthetic message', (tester) async {
       await turn(tester, 'en', cartTurn);
       await tester.tap(find.byIcon(Icons.shopping_cart_outlined));
       await settle(tester);
-      expect(intents, isEmpty);
+      expect(intents.single, isA<OpenCartIntent>());
+      expect(sent(), hasLength(1));
+      expect(c.messages.where((m) => m.text.contains("What's in my cart?")), isEmpty);
+      await finish(tester);
+    });
+
+    testWidgets('not bound, host declines: asks the assistant', (tester) async {
+      handled = false;
+      await turn(tester, 'en', cartTurn);
+      await tester.tap(find.byIcon(Icons.shopping_cart_outlined));
+      await settle(tester);
       expect(sent().last, contains("What's in my cart?"));
       await finish(tester);
     });
 
     testWidgets('ar phrase', (tester) async {
+      handled = false;
       await turn(tester, 'ar', cartTurn);
       await tester.tap(find.byIcon(Icons.shopping_cart_outlined));
       await settle(tester);
@@ -717,6 +872,28 @@ void main() {
       expect((m.text, m.checkout, m.orderIds, m.replyLang), ('تمام', null, null, null));
       expect(m.handoffUrl, 'https://shop.example/checkout/');
       expect(m.handoff, (url: 'https://shop.example/checkout/', target: 'checkout'));
+      c.dispose();
+      server.close();
+    });
+
+    test('malformed history actions never throw', () async {
+      var n = 0;
+      Map<String, dynamic> row(Object? action) => {..._replyRow(const {}), 'msg_ref': 'b${n++}', 'action': action};
+      server.historyRows = [
+        _userRow,
+        row('x'),
+        row(<Object>[]),
+        row({'order_collect': true, 'known': 'x', 'missing_fields': 'x'}),
+        row({'order_placed': true, 'order': 'x', 'order_ids': 'x'}),
+        row({'checkout_handoff': 5, 'order_ids': []}),
+        {...row(null), 'checkout_handoff': 5},
+      ];
+      make('en');
+      await openFresh();
+      expect(c.messages.where((m) => m.role == ChatRole.bot), hasLength(6));
+      expect(c.messages.map((m) => m.handoff), everyElement(isNull));
+      expect(c.messages.map((m) => m.orderIds), everyElement(isNull));
+      expect(events.whereType<ErrorEvent>(), isEmpty);
       c.dispose();
       server.close();
     });

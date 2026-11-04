@@ -45,6 +45,7 @@ void main() {
         ),
         storage: MemoryStorage(),
         lang: lang,
+        cartBridge: _Bridge(), // linked on the first send: Add asks the bot (D2)
         onIntent: (i) {
           intents.add(i);
           return handled;
@@ -563,4 +564,11 @@ void main() {
     expect(find.text('أضف للسلة'), findsNWidgets(2));
     await finish(tester);
   });
+}
+
+class _Bridge implements SunonoCartBridge {
+  @override
+  Future<Map<String, dynamic>?> probe(String userId) async => {'sig': 'p'};
+  @override
+  Future<Map<String, dynamic>?> ensureBind(String userId) async => {'sig': 'e'};
 }

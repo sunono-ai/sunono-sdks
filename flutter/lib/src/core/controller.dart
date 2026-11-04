@@ -232,6 +232,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   bool _bound = false;
   bool _ensureTried = false;
 
+  /// The last bind gave no link (no proof, refused, error) or the server
+  /// refused an add as unlinked. Cleared by a link or a re-bind.
+  bool _bindFailed = false;
+
   /// Cart write ordering. Every pull or history fetch takes a ticket
   /// (`++_cartReq`) when it STARTS; a turn or live write takes the next one
   /// when applied. A response applies only if its ticket is newer than the last
@@ -288,6 +292,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// A turn is in flight; the composer should not send.
   bool get busy => _busy;
+
+  /// Card Add opens the product page instead of asking the bot (D2): the bot
+  /// adds only to a linked storefront cart, and none is linked or linkable.
+  bool get addOpensProduct => !_bound && (cartBridge == null || _bindFailed);
 
   /// The card (`public_id`) whose Add started the running turn, if any.
   String? get addingRef => _busy && _running?.tap?.action == 'add_to_cart' ? _running!.tap!.ref : null;
@@ -603,6 +611,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _linkGen++;
     _bound = false;
     _ensureTried = false;
+    _bindFailed = false;
   }
 
   /// Follow the server's word on the link. A link that drops re-arms the
@@ -613,6 +622,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     if (linked && gen != _linkGen) return;
     if (!linked && _bound) _ensureTried = false;
     _bound = linked;
+    if (linked) _bindFailed = false;
   }
 
   /// A turn or live push wrote the cart: it is newer than any request in flight.
@@ -659,11 +669,19 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final uid = await _session.ensureUserId();
       final proof = ensure ? await bridge.ensureBind(uid) : await bridge.probe(uid);
-      if (proof == null || epoch != _epoch) return;
+      if (epoch != _epoch) return;
+      // Only a failed ensure counts: a probe with nothing to bind still lets the next send ensure.
+      if (proof == null) {
+        _bindFailed |= ensure;
+        return;
+      }
       final bound = await _api.bindCart(uid, proof);
-      if (epoch == _epoch) _setBound(bound, gen);
+      if (epoch != _epoch) return;
+      _setBound(bound, gen);
+      if (!bound) _bindFailed |= ensure;
     } catch (e, s) {
       if (epoch != _epoch) return; // a reset is not an error
+      _bindFailed |= ensure;
       if (e is SunonoHttpException && e.isPlatformDisabled) _disable('platform_disabled');
       _emit(ErrorEvent(e, s)); // never loops: next open/resume/refresh tries again
     }
@@ -914,7 +932,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     } else if (r.cartMutated) {
       _emit(CartChangedEvent(_cart, fromSync: true));
     }
-    if (r.relink) _unbind(); // the server dropped the link: ensure again next send
+    if (r.relink || r.cartUnlinked) _unbind(); // the server dropped the link: ensure again next send
+    if (r.cartUnlinked) _bindFailed = true; // until then Add opens the product
     if (r.silent && r.checkout == null && r.products.isEmpty) {
       _messages.remove(bot); // paused / blocked / silenced: say nothing
       return;
@@ -1211,10 +1230,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     if (!_hand(intent)) _emit(ErrorEvent(UnhandledIntent(intent)));
   }
 
-  /// View the cart: the host's cart screen while it shares the shopper's
-  /// storefront cart, otherwise (or when the host declines) ask the assistant.
+  /// View the cart: the host's cart screen (the app cart is the shopper's
+  /// truth, linked or not); only when the host declines, ask the assistant.
   Future<void> openCart() async {
-    if (_bound && _hand(const OpenCartIntent())) return;
+    if (_hand(const OpenCartIntent())) return;
     await send(cartPhrase(_lang), synthetic: true);
   }
 
@@ -1232,10 +1251,13 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Whether the host handled it (the sheet may close).
-  bool checkout(String? url) {
+  /// [target] `cart` (D1, app checkout): the host cart page, else (declined)
+  /// its native checkout screen when [nativeCheckout]; never the site [url].
+  bool checkout(String? url, {String target = 'checkout'}) {
     _emit(const AnalyticsEvent('assistant_checkout_tapped'));
-    final intent = CheckoutIntent(url: url);
-    final handled = _hand(intent);
+    final cart = target == 'cart';
+    final SunonoIntent intent = cart ? const OpenCartIntent() : CheckoutIntent(url: url);
+    final handled = _hand(intent) || (cart && nativeCheckout && _hand(const CheckoutIntent()));
     if (!handled) _emit(ErrorEvent(UnhandledIntent(intent)));
     _unbind(); // the order completes on the storefront and rotates its cart
     return handled;

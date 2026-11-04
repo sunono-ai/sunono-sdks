@@ -16,6 +16,7 @@ import 'golden_harness.dart';
 ///   more, the quick replies under the reply and the cart bar.
 /// - `checkout_*`: a confirm read-back with a phone (LTR in Arabic), then the
 ///   placed card with Order details and the handoff button.
+/// - `handoff_cart_*` (light): app checkout (D1), «افتح السلة» / "Open cart".
 void main() {
   setUpAll(loadGoldenFonts);
 
@@ -36,6 +37,8 @@ void main() {
       sara: 'سارة',
       amman: 'عمّان، الصويفية',
       total: '12.500 د.أ',
+      checkout: 'خلص بدي أطلب',
+      cartReady: 'سلتك جاهزة، افتح السلة من التطبيق وكمّل الطلب من هناك.',
     ),
     'en': (
       ask: 'I want coffee',
@@ -53,12 +56,14 @@ void main() {
       sara: 'Sara',
       amman: 'Amman, Sweifieh',
       total: '12.500 JOD',
+      checkout: "I'm ready to order",
+      cartReady: 'Your cart is ready. Open your cart in the app to finish your order.',
     ),
   };
 
-  for (final kind in ['cards', 'checkout']) {
+  for (final kind in ['cards', 'checkout', 'handoff_cart']) {
     for (final lang in ['ar', 'en']) {
-      for (final dark in [false, true]) {
+      for (final dark in kind == 'handoff_cart' ? [false] : [false, true]) {
         final name = '${kind}_${lang}_${dark ? 'dark' : 'light'}';
         testWidgets(name, (tester) async {
           goldenPhone(tester);
@@ -119,6 +124,10 @@ void main() {
                 ],
                 'total_fils': 8500,
               },
+            });
+          } else if (kind == 'handoff_cart') {
+            await turn(t.checkout, t.cartReady, {
+              'checkout_handoff': {'target': 'cart', 'url': 'https://shop.example/checkout/'},
             });
           } else {
             await turn(t.order, t.confirm, {
