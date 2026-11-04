@@ -27,8 +27,17 @@ class SunonoCopy {
   String get recovering => _t('بتأكد إنها وصلت…', 'Checking it went through…');
   String get disabled => _t('المساعد مش متاح هلّق', 'The assistant is unavailable right now');
   String get updateApp => _t('حدّث التطبيق عشان تستخدم المساعد', 'Please update the app to use the assistant');
-  String get online => _t('متصل', 'Online');
+  String get online => _t('متصل • جاهزين نساعدك', 'Online • Here to help');
   String get humanOnline => _t('فريق المتجر معك', 'Store team is with you');
+  String get offline => _t('غير متاح هلّق', 'Unavailable right now');
+  String get back => _t('رجوع', 'Back');
+  String get moreOptions => _t('خيارات أكثر', 'More options');
+  String get talkToTeam => _t('احكي مع الفريق', 'Talk to our team');
+
+  /// Sent (synthetic) by "Talk to our team": the server's escalate intent.
+  String get escalatePhrase => _t('بدي أحكي مع حدا من الفريق', "I'd like to talk to someone from your team");
+  String get welcomeTitle => _t('أهلاً، كيف بنقدر نساعدك؟', 'Hello, how can we help?');
+  String get welcomeSubtitle => _t('اسأل عن المنتجات، العروض أو طلبك.', 'Ask about products, offers or your order.');
 
   String error(String? code) => switch (code) {
         'rate_limited' => _t('رسائل كثير ورا بعض، استنى شوي وجرّب', 'Too many messages, wait a moment'),

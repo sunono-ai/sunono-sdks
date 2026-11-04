@@ -6,6 +6,7 @@ import '../core/host.dart';
 import '../core/models.dart';
 import 'cards.dart';
 import 'copy.dart';
+import 'header.dart';
 import 'theme.dart';
 
 /// The full assistant screen. Put it in a tab body or a route; it opens the
@@ -24,6 +25,10 @@ class SunonoChatView extends StatefulWidget {
     this.productSku,
     this.showHeader = true,
     this.onClose,
+    this.onBack,
+    this.menuItems = const [],
+    this.welcomeTitle,
+    this.welcomeSubtitle,
     this.autofocus = false,
   });
 
@@ -46,8 +51,17 @@ class SunonoChatView extends StatefulWidget {
   final String? productSku;
   final bool showHeader;
 
-  /// Shows a close button in the header (used by the bottom sheet).
+  /// Closes the bottom sheet; the header's back button calls it when there is no [onBack].
   final VoidCallback? onClose;
+
+  /// Shows the header's back button (e.g. pop your route) when the chat is a full screen.
+  final VoidCallback? onBack;
+
+  /// Extra entries in the header's ⋮ menu, after "Talk to our team".
+  final List<SunonoMenuItem> menuItems;
+
+  /// Replaces the welcome card's title / subtitle per language, e.g. `{'ar': '…', 'en': '…'}`.
+  final Map<String, String>? welcomeTitle, welcomeSubtitle;
 
   /// Focus the composer (and raise the keyboard) when the view opens. Off by
   /// default so switching to a Chat tab doesn't pop the keyboard.
@@ -182,9 +196,16 @@ class _SunonoChatViewState extends State<SunonoChatView> {
           child: ListView.builder(
             reverse: true,
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            itemCount: msgs.length + 1,
+            itemCount: msgs.length + 2,
             itemBuilder: (_, i) {
               final index = msgs.length - 1 - i;
+              if (index < -1) {
+                return WelcomeCard(
+                  theme: theme,
+                  title: widget.welcomeTitle?[lang] ?? t.welcomeTitle,
+                  subtitle: widget.welcomeSubtitle?[lang] ?? t.welcomeSubtitle,
+                );
+              }
               if (index < 0) {
                 return _MessageItem(
                   key: const ValueKey('welcome'),
@@ -267,12 +288,22 @@ class _SunonoChatViewState extends State<SunonoChatView> {
           top: false, // the header pads under the status bar on its own color
           child: Column(children: [
             if (widget.showHeader)
-              _Header(
+              ChatHeader(
                 theme: theme,
+                copy: t,
                 title: _c.config.title(lang) ?? t.title,
                 avatarUrl: _c.config.avatarUrl,
-                subtitle: _c.paused ? t.humanOnline : t.online,
-                onClose: widget.onClose,
+                status: _c.status == ChatStatus.disabled || _c.updateRequired
+                    ? HeaderStatus.unavailable
+                    : _c.paused
+                        ? HeaderStatus.team
+                        : HeaderStatus.online,
+                onBack: widget.onBack ?? widget.onClose,
+                backIsClose: widget.onBack == null,
+                onTalkToTeam: _c.paused || _c.status != ChatStatus.ready || _c.updateRequired
+                    ? null
+                    : () => _c.send(t.escalatePhrase, synthetic: true),
+                menuItems: widget.menuItems,
               ),
             Expanded(child: body),
           ]),
@@ -280,70 +311,6 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       ),
     );
   }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.theme, required this.title, required this.subtitle, this.avatarUrl, this.onClose});
-  final SunonoTheme theme;
-  final String title;
-
-  /// The shop's avatar; a flat placeholder shows while it loads or when it fails.
-  final String? avatarUrl;
-  final String subtitle;
-  final VoidCallback? onClose;
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration:
-            BoxDecoration(color: theme.headerBackground, border: Border(bottom: BorderSide(color: theme.outline))),
-        child: SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
-            child: Row(children: [
-              if (avatarUrl == null)
-                _FlatAvatar(theme: theme, size: 40)
-              else
-                ClipOval(
-                  child: Image.network(
-                    avatarUrl!,
-                    width: 40,
-                    height: 40,
-                    fit: BoxFit.cover,
-                    cacheWidth: (40 * MediaQuery.devicePixelRatioOf(context)).ceil(),
-                    excludeFromSemantics: true,
-                    loadingBuilder: (_, child, progress) =>
-                        progress == null ? child : _FlatAvatar(theme: theme, size: 40),
-                    errorBuilder: (_, __, ___) => _FlatAvatar(theme: theme, size: 40),
-                  ),
-                ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(title, style: theme.text(size: 17, weight: FontWeight.w700)),
-                  Row(children: [
-                    Container(
-                        width: 7, height: 7, decoration: BoxDecoration(color: theme.online, shape: BoxShape.circle)),
-                    const SizedBox(width: 5),
-                    Flexible(
-                      child: Text(subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.text(size: 12, color: theme.muted)),
-                    ),
-                  ]),
-                ]),
-              ),
-              if (onClose != null)
-                IconButton(
-                  onPressed: onClose,
-                  icon: Icon(Icons.close_rounded, color: theme.muted),
-                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-                ),
-            ]),
-          ),
-        ),
-      );
 }
 
 /// The assistant's flat stand-in avatar: a sparkle on a [SunonoTheme.primary]

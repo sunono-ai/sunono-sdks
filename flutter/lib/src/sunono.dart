@@ -6,6 +6,7 @@ import 'core/api.dart';
 import 'core/controller.dart';
 import 'core/host.dart';
 import 'ui/chat_view.dart';
+import 'ui/header.dart';
 import 'ui/theme.dart';
 
 /// The one-line integration. Call [init] in `main()` (no network happens
@@ -126,11 +127,26 @@ abstract final class Sunono {
   }
 
   /// The chat screen with the facade's photo picker and theme wired in.
-  static Widget view({SunonoTheme? theme, bool showHeader = true, bool autofocus = false}) => SunonoChatView(
+  /// [onBack] shows the header's back button (pop your route); [menuItems]
+  /// add to its ⋮ menu; [welcomeTitle]/[welcomeSubtitle] replace the welcome
+  /// card's copy per language.
+  static Widget view(
+          {SunonoTheme? theme,
+          bool showHeader = true,
+          bool autofocus = false,
+          VoidCallback? onBack,
+          List<SunonoMenuItem> menuItems = const [],
+          Map<String, String>? welcomeTitle,
+          Map<String, String>? welcomeSubtitle}) =>
+      SunonoChatView(
         controller: controller,
         theme: theme ?? _theme,
         pickImage: _pickImage,
         showHeader: showHeader,
         autofocus: autofocus,
+        onBack: onBack,
+        menuItems: menuItems,
+        welcomeTitle: welcomeTitle,
+        welcomeSubtitle: welcomeSubtitle,
       );
 }
