@@ -51,7 +51,7 @@ void main() {
           }
           ..historyRows = [
             _row('user', ar ? 'في عروض؟' : 'Any offers?', 'u1', 12),
-            _row('bot', ar ? 'أكيد! هدول عليهم خصم هالأسبوع 👇' : 'Sure! These are on sale this week 👇', 'b1', 13,
+            _row('bot', ar ? 'أكيد! هدول عليهم خصم هالأسبوع' : 'Sure! These are on sale this week', 'b1', 13,
                 products: [
                   _product('p1', 'كريم مرطب للوجه 50 مل', 'Face moisturiser 50 ml', 12.5, sale: 10),
                   _product('p2', 'غسول لطيف للبشرة', 'Gentle face wash', 7.25),

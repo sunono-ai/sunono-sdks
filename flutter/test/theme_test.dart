@@ -41,6 +41,7 @@ void main() {
         for (final MapEntry(key: how, value: t) in _themes(color).entries) {
           final why = '$brand / $how';
           expect(contrastRatio(t.onUserBubble, t.userBubble), greaterThanOrEqualTo(4.5), reason: '$why onUserBubble');
+          expect(contrastRatio(t.userBubble, t.chatBackground), greaterThanOrEqualTo(3), reason: '$why bubble on page');
           expect(contrastRatio(t.muted, t.chatBackground), greaterThanOrEqualTo(4.5), reason: '$why time on page');
           expect(contrastRatio(t.muted, t.botBubble), greaterThanOrEqualTo(4.5), reason: '$why muted on bubble');
           for (final bg in [t.surface, t.chatBackground, t.botBubble]) {
@@ -79,7 +80,13 @@ void main() {
       expect(t.online, t.success);
       expect(t.radius, 18);
       final dark = SunonoTheme.flat(primary: brand, dark: true);
-      expect(dark.userBubble, brand, reason: 'the user bubble stays the brand in dark');
+      expect(dark.userBubble, isNot(brand), reason: 'a dark brand is lifted on the dark page');
+      expect(contrastRatio(dark.userBubble, dark.chatBackground), greaterThanOrEqualTo(3));
+      final black = SunonoTheme.flat(primary: Colors.black, dark: true);
+      expect(contrastRatio(black.userBubble, black.chatBackground), greaterThanOrEqualTo(3));
+      expect(contrastRatio(black.onUserBubble, black.userBubble), greaterThanOrEqualTo(4.5));
+      expect(const SunonoTheme(userBubble: Colors.black, chatBackground: Colors.black).userBubble, Colors.black,
+          reason: 'an explicit userBubble is the host\'s call');
       expect(dark.botBubble.computeLuminance(), greaterThan(dark.chatBackground.computeLuminance()),
           reason: 'dark bubbles sit above the page');
       expect(dark.chatBackground, Color.alphaBlend(brand.withValues(alpha: 0.06), const Color(0xFF14121A)));

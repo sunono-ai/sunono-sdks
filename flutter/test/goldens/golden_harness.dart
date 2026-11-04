@@ -9,7 +9,9 @@ import 'package:flutter_test/flutter_test.dart';
 /// Flutter SDK cache, Noto Sans Arabic from `test/fonts` (OFL, see OFL.txt).
 /// They are pinned to one Flutter version in CI (`--tags golden`).
 Future<void> loadGoldenFonts() async {
-  final sdk = '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts';
+  final root = Platform.environment['FLUTTER_ROOT'];
+  if (root == null) throw StateError('FLUTTER_ROOT is not set: run goldens with `flutter test`, which sets it.');
+  final sdk = '$root/bin/cache/artifacts/material_fonts';
   ByteData read(String path) => ByteData.sublistView(File(path).readAsBytesSync());
   final roboto = FontLoader('Roboto');
   for (final w in ['Regular', 'Medium', 'Bold']) {

@@ -174,11 +174,17 @@ class SunonoTheme {
   /// Bot and staff bubbles.
   Color get botBubble => _botBubble ?? surface;
 
-  /// The shopper's bubble and the send button (defaults to [primary]).
-  Color get userBubble => _userBubble ?? primary;
+  /// The shopper's bubble and the send button: [primary], lifted toward
+  /// white (dark page) or black (light page) only as far as it must be to
+  /// stand out from [chatBackground] (3:1, e.g. a black brand in dark mode).
+  Color get userBubble => _userBubble ?? readableOn(primary, [chatBackground], min: 3);
 
-  /// Text on [userBubble].
-  Color get onUserBubble => _onUserBubble ?? (_userBubble == null ? onPrimary : onColor(userBubble));
+  /// Text on [userBubble] (4.5:1).
+  Color get onUserBubble {
+    if (_onUserBubble != null) return _onUserBubble;
+    final bubble = userBubble;
+    return bubble == primary ? onPrimary : onColor(bubble);
+  }
 
   /// Hairlines and borders (header bottom, composer, cards).
   Color get outline => _outline ?? Color.alphaBlend(onSurface.withValues(alpha: 0.12), surface);
@@ -274,12 +280,13 @@ Color onColor(Color fill) {
 }
 
 /// [color] moved toward white (dark backdrop) or black (light) just until it
-/// reaches 4.5:1 against every color in [on] (the first decides the direction).
-Color readableOn(Color color, List<Color> on) {
+/// reaches [min] (4.5:1 text; 3:1 for shapes) against every color in [on]
+/// (the first decides the direction).
+Color readableOn(Color color, List<Color> on, {double min = 4.5}) {
   final target = on.first.computeLuminance() < 0.5 ? Colors.white : Colors.black;
   for (var t = 0.0; t <= 1; t += 0.05) {
     final c = Color.lerp(color, target, t)!;
-    if (on.every((b) => contrastRatio(c, b) >= 4.5)) return c;
+    if (on.every((b) => contrastRatio(c, b) >= min)) return c;
   }
   return target;
 }
