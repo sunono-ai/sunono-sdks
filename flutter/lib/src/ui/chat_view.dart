@@ -194,10 +194,13 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       body = Column(children: [
         Expanded(
           child: ListView.builder(
-            reverse: true,
+            // Bottom-anchored once there are messages; an empty thread starts
+            // under the header (welcome card first), like the mockup.
+            reverse: msgs.isNotEmpty,
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             itemCount: msgs.length + 2,
-            itemBuilder: (_, i) {
+            itemBuilder: (_, row) {
+              final i = msgs.isNotEmpty ? row : 1 - row; // [card, welcome] top-down when empty
               final index = msgs.length - 1 - i;
               if (index < -1) {
                 return WelcomeCard(
@@ -300,7 +303,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                         : HeaderStatus.online,
                 onBack: widget.onBack ?? widget.onClose,
                 backIsClose: widget.onBack == null,
-                onTalkToTeam: _c.paused || _c.status != ChatStatus.ready || _c.updateRequired
+                onTalkToTeam: _c.paused || _c.busy || _c.status != ChatStatus.ready || _c.updateRequired
                     ? null
                     : () => _c.send(t.escalatePhrase, synthetic: true),
                 menuItems: widget.menuItems,

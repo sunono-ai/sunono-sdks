@@ -126,7 +126,9 @@ class ChatHeader extends StatelessWidget {
                             Icon(item.icon, size: 20, color: theme.primaryText),
                             const SizedBox(width: 12),
                           ],
-                          Flexible(child: Text(item.label, style: theme.text())),
+                          Flexible(
+                              child:
+                                  Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.text())),
                         ]),
                       ),
                     ),

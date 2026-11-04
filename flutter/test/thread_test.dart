@@ -580,7 +580,11 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(app(SunonoChatView(controller: make('ar')), textScale: 2));
       await settle(tester);
+      expect(tester.takeException(), isNull);
+      // An empty thread starts at the top (welcome card): the starters are below it.
+      await tester.dragUntilVisible(find.text('شو في جديد عندكم؟'), find.byType(ListView), const Offset(0, -200));
       expect(find.text('شو في جديد عندكم؟'), findsOneWidget);
+      expect(tester.takeException(), isNull);
       await finish(tester);
     });
   });

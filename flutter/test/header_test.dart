@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -166,6 +167,86 @@ void main() {
     await tester.pump();
     expect(find.text('Hello, how can we help?'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await finish(tester);
+  });
+
+  testWidgets('a running turn hides Talk to our team (a tap would be dropped)', (tester) async {
+    final hold = Completer<void>();
+    server.beforeChatReply = () => hold.future;
+    await tester.pumpWidget(
+        app(SunonoChatView(controller: make('en'), menuItems: [SunonoMenuItem(label: 'Help center', onTap: () {})])));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'hello');
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await settle(tester);
+    expect(c.busy, isTrue);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    expect(find.text('Help center'), findsOneWidget);
+    expect(find.text('Talk to our team'), findsNothing);
+    await tester.tapAt(const Offset(5, 400)); // dismiss
+    await tester.pumpAndSettle();
+    hold.complete();
+    await settle(tester);
+    expect(c.busy, isFalse);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    expect(find.text('Talk to our team'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 400));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
+
+  testWidgets('update required: reads unavailable, no menu', (tester) async {
+    server.config = {
+      'enabled': true,
+      'app': {'min_sdk_version': '99.0.0'},
+    };
+    await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+    await settle(tester);
+    expect(find.text('Unavailable right now'), findsOneWidget);
+    expect(find.text('Online • Here to help'), findsNothing);
+    expect(find.byTooltip('More options'), findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('200% text at 320 dp: the open ⋮ menu lays out without overflow', (tester) async {
+    tester.view.physicalSize = const Size(320 * 3, 640 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(app(
+        SunonoChatView(controller: make('ar'), menuItems: [
+          SunonoMenuItem(
+              label: 'مركز المساعدة والأسئلة الشائعة وسياسة الإرجاع والتوصيل', icon: Icons.help_outline, onTap: () {}),
+        ]),
+        textScale: 2));
+    await settle(tester);
+    await tester.tap(find.byTooltip('خيارات أكثر'));
+    await tester.pumpAndSettle();
+    expect(find.text('احكي مع الفريق'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tapAt(const Offset(5, 600));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
+
+  testWidgets('empty thread: the welcome card sits under the header; with messages the thread is bottom-anchored',
+      (tester) async {
+    await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+    await settle(tester);
+    final header = tester.getBottomLeft(find.byType(PopupMenuButton<VoidCallback>)).dy;
+    final card = tester.getTopLeft(find.text('Hello, how can we help?')).dy;
+    expect(card - header, lessThan(80));
+    expect(tester.getTopLeft(find.text('Hi! How can I help you today?')).dy, greaterThan(card));
+
+    await tester.enterText(find.byType(TextField), 'hello');
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await settle(tester);
+    expect(tester.widget<ListView>(find.byType(ListView)).reverse, isTrue);
+    // A short thread is anchored to the composer: the card moved down from under the header.
+    expect(tester.getTopLeft(find.text('Hello, how can we help?')).dy, greaterThan(card + 40));
     await finish(tester);
   });
 }
