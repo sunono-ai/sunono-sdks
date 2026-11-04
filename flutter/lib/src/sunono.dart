@@ -29,6 +29,13 @@ abstract final class Sunono {
   ///   for [CheckoutIntent]; the handoff button then reads «كمّل الطلب» /
   ///   "Complete your order" instead of «…بالموقع» / "…on the site".
   /// - [pickImage]: enables photo messages.
+  /// - [voiceRecorder]: enables voice notes (the mic shows while the input is
+  ///   empty). Tap to record, tap send (auto-sends at 60 s) or ✕. Implement it
+  ///   with any recorder plugin; the SDK ships no native code.
+  /// - [audioPlayer]: plays voice bubbles; without one they show the duration
+  ///   and transcript only.
+  /// - [onOpenSettings]: opens your app's settings, offered when the recorder
+  ///   reports the microphone permission denied.
   /// - [quickReplies]: the chips under the latest reply and on an empty
   ///   thread, per language, e.g.
   ///   `{'en': [SunonoQuickReply('Gift ideas', Icons.redeem, 'Any gift ideas?')]}`;
@@ -47,6 +54,9 @@ abstract final class Sunono {
     SunonoCartBridge? cartBridge,
     bool nativeCheckout = false,
     Future<SunonoImage?> Function()? pickImage,
+    SunonoVoiceRecorder? voiceRecorder,
+    SunonoAudioPlayer? audioPlayer,
+    VoidCallback? onOpenSettings,
     bool Function(SunonoIntent intent)? onIntent,
     Map<String, List<String>>? starterPrompts,
     Map<String, List<SunonoQuickReply>>? quickReplies,
@@ -70,6 +80,9 @@ abstract final class Sunono {
       onIntent: onIntent,
       starterPrompts: starterPrompts,
       quickReplies: quickReplies,
+      voiceRecorder: voiceRecorder,
+      audioPlayer: audioPlayer,
+      onOpenSettings: onOpenSettings,
     );
   }
 

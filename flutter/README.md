@@ -134,6 +134,100 @@ Pass `pickImage` to `Sunono.init` to show the photo button. Return a JPEG resize
 
 The photo uploads as soon as it is picked, with a progress ring on the preview; JPEG, PNG and WebP up to 5 MB are accepted. Errors (too large, unreadable, refused, photos unavailable, offline) show under the preview with a Retry where it can help, and a caption is required to send. Headless: `controller.attachPhoto(image)`, `controller.photo` (`PhotoIdle | PhotoUploading | PhotoReady | PhotoFailed`), `retryPhoto()`, `removePhoto()`; `send(text)` carries a ready photo.
 
+## Voice notes
+
+Pass `voiceRecorder` to `Sunono.init` to show the mic (it takes the send button's place while the input is empty). The SDK has no native code: you implement the recorder, and optionally the player, with any plugin. The SDK draws the recording bar (timer, level meter, cancel, send) and handles uploads, errors and screen readers (it is tap to record, not hold to talk).
+
+- **Caps.** A note auto-sends at 60 s. Under 1 s it is discarded. Over 1.5 MB it is refused before uploading. Record AAC in m4a, mono, at 64 kbps or less: a full minute is then about 0.5 MB.
+- **Transcript.** The server transcribes the note on upload. The shopper's bubble shows «سمعناك: …» / "We heard: …", so they see what the assistant will act on.
+- **Playback.** Pass `audioPlayer` to put a play button on voice bubbles: the note just recorded plays from its bytes, a restored one from its URL (mp3).
+- **Lifecycle.** A recording is thrown away (`cancel()`) when the app goes to the background, on `Sunono.reset()` and on dispose.
+- **Permissions.** `start()` asks for the microphone; return `false` when it is denied. Pass `onOpenSettings` to offer a Settings button with the "allow the microphone" hint. Add the permission strings: iOS `NSMicrophoneUsageDescription` in `Info.plist`, Android `<uses-permission android:name="android.permission.RECORD_AUDIO"/>`.
+
+A host implementation with [`record`](https://pub.dev/packages/record), [`just_audio`](https://pub.dev/packages/just_audio) and [`path_provider`](https://pub.dev/packages/path_provider):
+
+```dart
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:sunono/sunono.dart';
+
+class RecordVoice implements SunonoVoiceRecorder {
+  final _rec = AudioRecorder();
+  final _clock = Stopwatch();
+  String? _path;
+
+  @override
+  Future<bool> start() async {
+    if (!await _rec.hasPermission()) return false;
+    final dir = await getTemporaryDirectory();
+    _path = '${dir.path}/sunono_voice.m4a';
+    await _rec.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, numChannels: 1, sampleRate: 44100),
+      path: _path!,
+    );
+    _clock..reset()..start();
+    return true;
+  }
+
+  @override
+  Stream<double> get levels => _rec
+      .onAmplitudeChanged(const Duration(milliseconds: 100))
+      .map((a) => ((a.current + 50) / 50).clamp(0.0, 1.0)); // dBFS -50..0 → 0..1
+
+  @override
+  Future<SunonoAudio?> stop() async {
+    final path = await _rec.stop();
+    _clock.stop();
+    if (path == null) return null;
+    final file = File(path);
+    final bytes = await file.readAsBytes();
+    await file.delete();
+    return SunonoAudio(bytes, mimeType: 'audio/mp4', duration: _clock.elapsed);
+  }
+
+  @override
+  Future<void> cancel() async {
+    await _rec.cancel(); // also deletes the file
+    _clock.stop();
+  }
+}
+
+class JustAudioPlayer implements SunonoAudioPlayer {
+  final _player = AudioPlayer();
+
+  @override
+  Future<void> play({Uint8List? bytes, String? url}) async {
+    await _player.stop();
+    if (bytes != null) {
+      final file = File('${(await getTemporaryDirectory()).path}/sunono_play.m4a');
+      await file.writeAsBytes(bytes);
+      await _player.setFilePath(file.path);
+    } else {
+      await _player.setUrl(url!);
+    }
+    _player.play(); // completes when playback ends: don't await
+  }
+
+  @override
+  Future<void> stop() => _player.stop();
+
+  @override
+  Stream<Duration> get position => _player.positionStream;
+
+  @override
+  Stream<bool> get playing =>
+      _player.playerStateStream.map((s) => s.playing && s.processingState != ProcessingState.completed);
+}
+
+// Sunono.init(..., voiceRecorder: RecordVoice(), audioPlayer: JustAudioPlayer(), onOpenSettings: openAppSettings); // e.g. from permission_handler
+```
+
+Errors show in the shopper's language: not understood (`audio_unclear`), too long or too large, voice notes busy for now (`voice_busy`), voice notes unavailable (`audio_unavailable`, `voice_unavailable`; the latter also hides the mic until the app restarts), offline and rate limited. Retry only appears where it can help, because every upload is a paid transcription. Headless: `controller.startVoice()`, `stopVoice()` (sends), `cancelVoice()`, `controller.voice` (`VoiceIdle | VoiceRecording | VoiceUploading | VoiceFailed`), `toggleVoicePlayback(message)` and `playingVoice`.
+
 ## Data collected and privacy
 
 Use this table for your App Store privacy label and Google Play Data Safety form.
@@ -143,10 +237,11 @@ Use this table for your App Store privacy label and Google Play Data Safety form
 | Anonymous user ID | Always (stored in your `SunonoStorage`) | Keeps the shopper's chat and cart between launches |
 | Messages | Always | Answering the shopper |
 | Photos | Only when the shopper attaches one (`pickImage`) | Finding similar products |
+| Voice recordings and their transcripts | Only when the shopper records a voice note (`voiceRecorder`) | Understanding the request (speech-to-text) |
 | Name, phone, address, email | Only for shops that run checkout or order tracking in the chat | Placing, delivering and tracking the order |
 | Purchase history | Orders placed through the assistant | Order tracking, reordering |
 
-This data is processed by Sunono and its subprocessors: AI model providers, message-safety checking, SMS for one-time codes (when the shop enables it) and cloud storage for photos. See [Sunono's privacy policy](https://dashboard.sunono.ai/privacy-policy) for the current list. It is linked to the anonymous ID, not to an account of yours, unless the shopper types identifying details into the chat. The SDK collects no advertising ID and no device identifiers, and does no tracking across apps.
+This data is processed by Sunono and its subprocessors: AI model providers, message-safety checking, SMS for one-time codes (when the shop enables it) and cloud storage for photos and voice notes; voice notes also go to a speech-to-text provider. See [Sunono's privacy policy](https://dashboard.sunono.ai/privacy-policy) for the current list. It is linked to the anonymous ID, not to an account of yours, unless the shopper types identifying details into the chat. The SDK collects no advertising ID and no device identifiers, and does no tracking across apps.
 
 **Deletion.** `Sunono.reset()` unlinks this device from the shopper's data (logout); it does **not** delete it. A shopper who wants their data deleted asks the shop or Sunono support (support@sunono.ai).
 

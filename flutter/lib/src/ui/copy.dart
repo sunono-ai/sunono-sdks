@@ -19,6 +19,22 @@ class SunonoCopy {
   String get attach => _t('إرفاق', 'Attach');
   String get photo => _t('صورة', 'Photo');
   String get recordVoice => _t('سجّل رسالة صوتية', 'Record a voice message');
+  String get recording => _t('عم نسجّل', 'Recording');
+  String recordingFor(int seconds) => _t('عم نسجّل، $seconds ثانية', 'Recording, $seconds seconds');
+  String get cancelRecording => _t('إلغاء التسجيل', 'Cancel recording');
+  String get sendVoice => _t('ابعث الرسالة الصوتية', 'Send voice message');
+  String get playVoice => _t('شغّل الرسالة الصوتية', 'Play voice message');
+  String get stopVoice => _t('وقّف الرسالة الصوتية', 'Stop voice message');
+  String get openSettings => _t('الإعدادات', 'Settings');
+  String weHeard(String transcript) => _t('سمعناك: $transcript', 'We heard: $transcript');
+  String uploadingVoice(int percent) => _t('عم نبعث الرسالة الصوتية $percent%', 'Sending voice message $percent%');
+
+  /// The voice bubble for screen readers: «رسالة صوتية، 12 ثانية: …» plus the transcript.
+  String voiceNote(int seconds, String transcript) {
+    final head = _t('رسالة صوتية، $seconds ثانية', 'Voice message, $seconds seconds');
+    return transcript.trim().isEmpty ? head : '$head: $transcript';
+  }
+
   String get removePhoto => _t('شيل الصورة', 'Remove photo');
   String get welcome => _t('أهلاً بك! كيف يمكنني مساعدتك اليوم؟', 'Hi! How can I help you today?');
 
@@ -67,6 +83,19 @@ class SunonoCopy {
           _t('الصور مش متاحة هلّق، احكيلي شو بدك بالكلام', "Photos aren't available right now — tell me in words"),
         'customer_blocked' => _t('ما بنقدر نستقبل صور هلّق', "We can't accept photos right now"),
         'image_blocked' => _t('ما بنقدر نستخدم هالصورة', "We can't use that photo"),
+        'audio_unclear' => _t('ما سمعت منيح، جرّب مرة ثانية', "I couldn't hear that clearly, try again"),
+        'audio_too_long' => _t('الرسالة الصوتية أطول من دقيقة، سجّل أقصر', 'Voice messages can be up to a minute'),
+        'audio_too_large' => _t('الرسالة الصوتية كبيرة كثير', 'That voice message is too large'),
+        'invalid_audio' => _t('ما قدرنا نقرأ التسجيل، جرّب مرة ثانية', "We couldn't read that recording, try again"),
+        'audio_unavailable' =>
+          _t('الرسائل الصوتية مش متاحة هلّق، اكتبلي', "Voice messages aren't available right now — type it instead"),
+        'voice_busy' => _t('الرسائل الصوتية عليها ضغط هلّق، اكتبلي لو سمحت',
+            'Voice messages are busy right now — please type instead'),
+        'voice_unavailable' =>
+          _t('الرسائل الصوتية مش متاحة بهالمتجر، اكتبلي', "Voice messages aren't available here — please type instead"),
+        'voice_too_short' => _t('سجّل رسالة أطول', 'Record a longer message'),
+        'mic_denied' => _t('اسمح للتطبيق يستخدم المايكروفون عشان تسجّل', 'Allow microphone access to record'),
+        'voice_failed' => _t('ما قدرنا نسجّل هلّق', "We couldn't record right now"),
         _ => _t('ما وصلت الرسالة', "The message didn't go through"),
       };
 

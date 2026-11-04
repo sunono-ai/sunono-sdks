@@ -196,7 +196,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       final msgs = _c.messages;
       // Quick replies: on an empty thread, else under the latest reply; only
       // while the assistant can take a turn (idle, not paused).
-      final idle = !_c.busy && !_c.paused && _c.status == ChatStatus.ready;
+      final idle = !_c.busy && !_c.paused && !_c.recording && _c.status == ChatStatus.ready;
       final last = msgs.lastOrNull;
       // The host's quick replies (at most 3), else the defaults. Legacy
       // starterPrompts stay on the empty thread only, as in 0.2.
@@ -298,16 +298,16 @@ class _SunonoChatViewState extends State<SunonoChatView> {
               onTap: _c.busy ? null : _c.openCart,
             ),
           ),
-        ValueListenableBuilder<PhotoState>(
-          valueListenable: _c.photo,
-          builder: (context, photo, _) => Composer(
+        ListenableBuilder(
+          listenable: Listenable.merge([_c.photo, _c.voice]),
+          builder: (context, _) => Composer(
             theme: theme,
             controller: _input,
             focus: _focus,
-            hint: photo is PhotoIdle ? t.inputHint : t.photoCaptionHint,
+            hint: _c.photo.value is PhotoIdle ? t.inputHint : t.photoCaptionHint,
             canSend: !_c.busy &&
                 _c.status == ChatStatus.ready &&
-                switch (photo) {
+                switch (_c.photo.value) {
                   PhotoReady() => true, // an empty caption shows the hint instead of sending
                   PhotoUploading() => false,
                   PhotoFailed(:final retryable) => !retryable && _input.text.trim().isNotEmpty,
@@ -315,13 +315,19 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                 },
             onSend: _send,
             onPickPhoto: widget.pickImage == null ? null : _attach,
-            photo: photo,
+            photo: _c.photo.value,
             image: _c.photoImage,
             needCaption: _needCaption,
             onRemovePhoto: _removePhoto,
             onRetryPhoto: _c.retryPhoto,
             copy: t,
             autofocus: widget.autofocus,
+            onMic: _c.voiceAvailable ? _c.startVoice : null,
+            canRecord: _c.canRecord,
+            voice: _c.voice.value,
+            onCancelVoice: _c.cancelVoice,
+            onSendVoice: _c.stopVoice,
+            onOpenSettings: _c.onOpenSettings,
           ),
         ),
       ]);
@@ -350,7 +356,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                         : HeaderStatus.online,
                 onBack: widget.onBack ?? widget.onClose,
                 backIsClose: widget.onBack == null,
-                onTalkToTeam: _c.paused || _c.busy || _c.status != ChatStatus.ready || _c.updateRequired
+                onTalkToTeam: _c.paused || _c.busy || _c.recording || _c.status != ChatStatus.ready || _c.updateRequired
                     ? null
                     : () => _c.send(t.escalatePhrase, synthetic: true),
                 menuItems: widget.menuItems,
@@ -579,26 +585,48 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
                   ),
                 ),
               ),
-            _readable(
-              sender: t.you,
-              text: m.text,
-              end: true,
-              bubble: Container(
-                padding: pad,
-                decoration: bubble,
-                child: _BubbleText(
-                    text: m.text,
-                    theme: theme,
-                    color: theme.onUserBubble,
-                    uiRtl: widget.lang == 'ar',
-                    onLink: c.openUrl),
+            if (m.isVoice)
+              _readable(
+                sender: t.you,
+                text: m.text,
+                end: true,
+                bubble: _VoiceBubble(message: m, controller: c, theme: theme, copy: t, decoration: bubble),
+                under: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  if (m.text.trim().isNotEmpty)
+                    ExcludeSemantics(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(t.weHeard(m.text),
+                            textDirection: isRtlText(m.text, fallbackRtl: widget.lang == 'ar')
+                                ? TextDirection.rtl
+                                : TextDirection.ltr,
+                            style: theme.text(size: 13, color: theme.muted)),
+                      ),
+                    ),
+                  Row(mainAxisSize: MainAxisSize.min, children: [time, const SizedBox(width: 4), status]),
+                ]),
+              )
+            else
+              _readable(
+                sender: t.you,
+                text: m.text,
+                end: true,
+                bubble: Container(
+                  padding: pad,
+                  decoration: bubble,
+                  child: _BubbleText(
+                      text: m.text,
+                      theme: theme,
+                      color: theme.onUserBubble,
+                      uiRtl: widget.lang == 'ar',
+                      onLink: c.openUrl),
+                ),
+                under: Row(mainAxisSize: MainAxisSize.min, children: [
+                  time,
+                  const SizedBox(width: 4),
+                  status,
+                ]),
               ),
-              under: Row(mainAxisSize: MainAxisSize.min, children: [
-                time,
-                const SizedBox(width: 4),
-                status,
-              ]),
-            ),
           ]),
         ),
       );
@@ -650,11 +678,15 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
               Flexible(child: Text(t.error(m.errorCode), style: theme.text(size: 13, color: theme.danger))),
             ]),
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: SunonoChip(
-                theme: theme, label: t.retry, icon: Icons.refresh_rounded, onTap: c.busy ? null : () => c.retry(m)),
-          ),
+          if (m.retryable)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SunonoChip(
+                  theme: theme,
+                  label: t.retry,
+                  icon: Icons.refresh_rounded,
+                  onTap: c.busy || c.recording ? null : () => c.retry(m)),
+            ),
         ]),
       );
     } else {
@@ -775,6 +807,120 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
 }
 
 const _avatarSize = 32.0;
+
+/// The shopper's voice note: play/stop (with a player) or a mic icon, a
+/// static waveform and the duration (the playback position while playing).
+/// While its upload runs, a progress ring takes the button's place. Live and
+/// restored notes look the same.
+class _VoiceBubble extends StatelessWidget {
+  const _VoiceBubble(
+      {required this.message,
+      required this.controller,
+      required this.theme,
+      required this.copy,
+      required this.decoration});
+  final ChatMessage message;
+  final SunonoChatController controller;
+  final SunonoTheme theme;
+  final SunonoCopy copy;
+  final BoxDecoration decoration;
+
+  /// A fixed shape, not the captured levels: a restored note has none.
+  static const _wave = [0.35, 0.6, 0.9, 0.5, 0.75, 1.0, 0.55, 0.8, 0.4, 0.65, 0.9, 0.45];
+
+  static String _clock(Duration d) {
+    final s = d.inSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = message, c = controller, player = c.audioPlayer;
+    final on = theme.onUserBubble;
+    final duration = m.audioDuration ?? Duration.zero;
+    final seconds = (duration.inMilliseconds / 1000).round().clamp(1, 3600);
+    return ListenableBuilder(
+      listenable: Listenable.merge([c.voice, c.playingVoice]),
+      builder: (context, _) {
+        final uploading = c.isSending(m) && c.voice.value is VoiceUploading;
+        final playing = player != null && c.playingVoice.value == m.id;
+        final Widget lead;
+        if (uploading) {
+          final p = (c.voice.value as VoiceUploading).progress;
+          lead = SizedBox.square(
+            dimension: 48,
+            child: Center(
+              child: SizedBox.square(
+                dimension: 24,
+                child: CircularProgressIndicator(
+                    value: p, strokeWidth: 3, color: on, semanticsLabel: copy.uploadingVoice((p * 100).round())),
+              ),
+            ),
+          );
+        } else if (player != null) {
+          lead = IconButton(
+            onPressed: () => c.toggleVoicePlayback(m),
+            tooltip: playing ? copy.stopVoice : copy.playVoice,
+            style: IconButton.styleFrom(fixedSize: const Size.square(48), foregroundColor: on),
+            // Play points right in both directions (a media convention, not reading order).
+            icon: Icon(playing ? Icons.stop_rounded : Icons.play_arrow_rounded, color: on, size: 28),
+          );
+        } else {
+          lead = SizedBox.square(dimension: 48, child: Icon(Icons.mic_rounded, color: on, size: 24));
+        }
+        final length = Text(_clock(duration),
+            textDirection: TextDirection.ltr, maxLines: 1, style: theme.text(size: 13, color: on));
+        return Container(
+          padding: const EdgeInsetsDirectional.fromSTEB(4, 4, 14, 4),
+          decoration: decoration,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            lead,
+            const SizedBox(width: 4),
+            Flexible(
+              child: Semantics(
+                container: true,
+                label: copy.voiceNote(seconds, m.text),
+                child: ExcludeSemantics(
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(
+                      // The wave runs in time order, like the timer; it gives way at large text.
+                      child: SizedBox(
+                        width: 72,
+                        height: 24,
+                        child: Directionality(
+                          textDirection: TextDirection.ltr,
+                          child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                            for (final h in _wave)
+                              Container(
+                                width: 3,
+                                height: 4 + 20 * h,
+                                decoration: BoxDecoration(
+                                    color: on.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(2)),
+                              ),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    if (playing)
+                      StreamBuilder<Duration>(
+                          stream: c.audioPlayer?.position,
+                          builder: (_, snap) => snap.hasData
+                              ? Text(_clock(snap.data!),
+                                  textDirection: TextDirection.ltr, maxLines: 1, style: theme.text(size: 13, color: on))
+                              : length)
+                    else
+                      length,
+                  ]),
+                ),
+              ),
+            ),
+          ]),
+        );
+      },
+    );
+  }
+}
 
 /// «اليوم» centered between two hairlines: the first message of a day.
 class _DayPill extends StatelessWidget {

@@ -137,7 +137,8 @@ class SunonoApi {
   /// [productId] (a card's public id) wins over [productSku]; [tap] is the
   /// structured card tap `(action, action_ref)` (PROTOCOL §4).
   Map<String, Object?> _turnBody(String text, String lang, bool synthetic, String? productId, String? productSku,
-          ({String action, String ref})? tap, String? imageRef, String? clientMessageId) =>
+          ({String action, String ref})? tap, String? imageRef, String? clientMessageId,
+          [String? audioRef]) =>
       {
         'message': text,
         'lang': lang,
@@ -147,6 +148,7 @@ class SunonoApi {
         if (productId != null) 'product_id': productId else if (productSku != null) 'product_sku': productSku,
         if (clientMessageId != null) 'client_message_id': clientMessageId,
         if (imageRef != null) 'image_ref': imageRef,
+        if (audioRef != null) 'audio_ref': audioRef,
       };
 
   /// Text turn (PROTOCOL §4.0): completes server-side even if we disconnect.
@@ -166,8 +168,8 @@ class SunonoApi {
     return TurnResult.fromJson(_obj(await _decode(r)));
   }
 
-  /// Streamed turn (PROTOCOL §4.0b), used for photo turns. HTTP errors throw
-  /// before the first frame.
+  /// Streamed turn (PROTOCOL §4.0b), used for photo and voice turns. HTTP
+  /// errors throw before the first frame. A voice turn sends an empty [text].
   Stream<SseFrame> chatStream(String token, String text,
       {required String lang,
       bool synthetic = false,
@@ -175,10 +177,12 @@ class SunonoApi {
       String? productSku,
       ({String action, String ref})? tap,
       String? imageRef,
+      String? audioRef,
       String? clientMessageId}) async* {
     final req = http.Request('POST', Uri.parse('$_shop/chat/stream'))
       ..headers.addAll(_headers(token: token, json: true))
-      ..body = jsonEncode(_turnBody(text, lang, synthetic, productId, productSku, tap, imageRef, clientMessageId));
+      ..body =
+          jsonEncode(_turnBody(text, lang, synthetic, productId, productSku, tap, imageRef, clientMessageId, audioRef));
     final sending = _client.send(req);
     final res = await sending.timeout(turnTimeout, onTimeout: () {
       // A late response would hold its socket open unread: drain it.
@@ -243,10 +247,41 @@ class SunonoApi {
   /// backpressure, so it tracks what left the device). Completing [abort]
   /// closes the connection, which stops the transfer.
   Future<String> upload(String token, List<int> bytes,
-      {String filename = 'photo.jpg', void Function(double)? onProgress, Future<void>? abort}) async {
+          {String filename = 'photo.jpg', void Function(double)? onProgress, Future<void>? abort}) async =>
+      '${(await _upload(token, 'image', bytes, filename, onProgress, abort))['image_ref']}';
+
+  /// Voice note upload (PROTOCOL §9, field `audio`): the server transcribes
+  /// it at once. Returns the `audio_ref` for the next turn, the transcript and
+  /// the measured duration. Not idempotent (each call is a paid transcription).
+  Future<({String ref, String transcript, int? durationMs})> uploadAudio(String token, List<int> bytes,
+      {required String mimeType, void Function(double)? onProgress, Future<void>? abort}) async {
+    final j = await _upload(token, 'audio', bytes, 'voice.${_audioExt(mimeType)}', onProgress, abort);
+    final ms = j['duration_ms'];
+    return (
+      ref: '${j['audio_ref']}',
+      transcript: j['transcript'] is String ? j['transcript'] as String : '',
+      durationMs: ms is num ? ms.round() : null,
+    );
+  }
+
+  static String _audioExt(String mime) => switch (mime.split(';').first.trim().toLowerCase()) {
+        'audio/mp4' || 'audio/m4a' || 'audio/x-m4a' => 'm4a',
+        'audio/aac' => 'aac',
+        'audio/ogg' || 'audio/opus' => 'ogg',
+        'audio/webm' => 'webm',
+        'audio/mpeg' || 'audio/mp3' => 'mp3',
+        'audio/wav' || 'audio/x-wav' || 'audio/wave' => 'wav',
+        'audio/3gpp' => '3gp',
+        _ => 'm4a',
+      };
+
+  Future<Map<String, dynamic>> _upload(String token, String field, List<int> bytes, String filename,
+      void Function(double)? onProgress, Future<void>? abort) async {
+    // ponytail: the part's Content-Type stays application/octet-stream (setting it needs http_parser,
+    // a dependency of its own); the server judges media by its bytes and the filename names the type.
     final multipart = http.MultipartRequest('POST', Uri.parse('$_shop/chat/upload'))
       ..headers.addAll(_headers(token: token))
-      ..files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
+      ..files.add(http.MultipartFile.fromBytes(field, bytes, filename: filename));
     final body = multipart.finalize(); // also sets the multipart content-type
     final req = _ChunkedRequest(multipart.url, body, multipart.contentLength, onProgress)
       ..headers.addAll(multipart.headers);
@@ -258,7 +293,7 @@ class SunonoApi {
       // outlasts [requestTimeout], so it gets [turnTimeout]) and the reply body.
       final sent = await client.send(req).timeout(turnTimeout);
       final r = await http.Response.fromStream(sent).timeout(requestTimeout);
-      return '${_obj(await _decode(r))['image_ref']}';
+      return _obj(await _decode(r));
     } finally {
       client.close();
     }

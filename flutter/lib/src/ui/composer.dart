@@ -26,6 +26,11 @@ class Composer extends StatelessWidget {
     required this.copy,
     this.autofocus = false,
     this.onMic,
+    this.canRecord = true,
+    this.voice = const VoiceIdle(),
+    this.onCancelVoice,
+    this.onSendVoice,
+    this.onOpenSettings,
   });
 
   final SunonoTheme theme;
@@ -48,6 +53,18 @@ class Composer extends StatelessWidget {
   /// Starts a voice note. When set, the send slot shows the mic while the
   /// input is empty and no photo is attached.
   final VoidCallback? onMic;
+
+  /// The mic is tappable (no turn running).
+  final bool canRecord;
+
+  /// While [VoiceRecording] the bar becomes the recording bar; a
+  /// [VoiceFailed] shows its reason above the input.
+  final VoiceState voice;
+  final VoidCallback? onCancelVoice;
+  final VoidCallback? onSendVoice;
+
+  /// Offered with the `mic_denied` hint.
+  final VoidCallback? onOpenSettings;
 
   /// The attachment sheet. Only photos today; one row per attachment type.
   Future<void> _openAttachments(BuildContext context) async {
@@ -92,8 +109,8 @@ class Composer extends StatelessWidget {
     return KeyEventResult.handled;
   }
 
-  /// A 48 dp outlined circle (`+`, mic).
-  Widget _outlined(IconData icon, String label, VoidCallback onPressed) => IconButton.outlined(
+  /// A 48 dp outlined circle (`+`, mic, cancel).
+  Widget _outlined(IconData icon, String label, VoidCallback? onPressed) => IconButton.outlined(
         onPressed: onPressed,
         tooltip: label,
         style: IconButton.styleFrom(
@@ -104,9 +121,73 @@ class Composer extends StatelessWidget {
         icon: Icon(icon, color: theme.onSurface),
       );
 
+  /// The round filled send button (text or voice).
+  Widget _send(String label, VoidCallback? onPressed) => IconButton.filled(
+        onPressed: onPressed,
+        tooltip: label,
+        style: IconButton.styleFrom(
+          fixedSize: const Size.square(48),
+          backgroundColor: theme.userBubble,
+          disabledBackgroundColor: theme.userBubble.withValues(alpha: 0.4),
+        ),
+        // Up in both directions: nothing to mirror.
+        icon: Icon(Icons.arrow_upward_rounded,
+            color: onPressed != null ? theme.onUserBubble : theme.onUserBubble.withValues(alpha: 0.7)),
+      );
+
+  /// ✕, a red dot, the LTR timer, 12 level bars and send. The timer is
+  /// announced every 10 s through a live region, not every tick.
+  Widget _recordingBar(VoiceRecording r) {
+    final secs = r.elapsed.inSeconds;
+    final clock = '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
+    final bars = [...List<double>.filled(12 - r.levels.length.clamp(0, 12), 0), ...r.levels.take(12)];
+    return Row(children: [
+      _outlined(Icons.close_rounded, copy.cancelRecording, onCancelVoice),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Semantics(
+          liveRegion: true,
+          label: secs < 10 ? copy.recording : copy.recordingFor(secs ~/ 10 * 10),
+          child: ExcludeSemantics(
+            child: Row(children: [
+              // Static (no pulse): reduced motion for everyone.
+              Container(width: 10, height: 10, decoration: BoxDecoration(color: theme.danger, shape: BoxShape.circle)),
+              const SizedBox(width: 8),
+              Text(clock,
+                  textDirection: TextDirection.ltr,
+                  maxLines: 1,
+                  style: theme.text(size: 15, weight: FontWeight.w600, color: theme.onSurface)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 28,
+                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                    // Flexible: the bars thin out rather than overflow at large text.
+                    for (final l in bars)
+                      Flexible(
+                        child: Container(
+                          width: 3,
+                          height: 4 + 24 * l,
+                          margin: const EdgeInsets.symmetric(horizontal: 1),
+                          decoration: BoxDecoration(color: theme.primaryText, borderRadius: BorderRadius.circular(2)),
+                        ),
+                      ),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+      const SizedBox(width: 12),
+      _send(copy.sendVoice, onSendVoice),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final mic = onMic != null && photo is PhotoIdle && controller.text.trim().isEmpty;
+    final recording = voice is VoiceRecording ? voice as VoiceRecording : null;
     final radius = BorderRadius.circular(24);
     return DecoratedBox(
       decoration: BoxDecoration(color: theme.surface, border: Border(top: BorderSide(color: theme.outline))),
@@ -116,59 +197,60 @@ class Composer extends StatelessWidget {
           padding: const EdgeInsets.all(8),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             if (photo is! PhotoIdle && image != null) ..._preview(),
-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              if (onPickPhoto != null) ...[
-                _outlined(Icons.add_rounded, copy.attach, () => _openAttachments(context)),
-                const SizedBox(width: 8),
-              ],
-              Expanded(
-                child: Focus(
-                  canRequestFocus: false,
-                  skipTraversal: true,
-                  onKeyEvent: _onKey,
-                  child: TextField(
-                    controller: controller,
-                    focusNode: focus,
-                    autofocus: autofocus,
-                    minLines: 1,
-                    maxLines: 5, // then it scrolls
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => onSend(),
-                    style: theme.text(size: 15),
-                    cursorColor: theme.primaryText,
-                    decoration: InputDecoration(
-                      hintText: hint,
-                      hintMaxLines: 1, // a wrapped hint at 200% text would eat the screen
-                      hintStyle: theme.text(size: 15, color: theme.muted),
-                      filled: true,
-                      fillColor: theme.surface,
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      enabledBorder:
-                          OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: theme.controlOutline)),
-                      focusedBorder: OutlineInputBorder(
-                          borderRadius: radius, borderSide: BorderSide(color: theme.primaryText, width: 1.5)),
+            if (voice case VoiceFailed(:final code))
+              _note(Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
+                Text(copy.error(code), style: theme.text(size: 13, color: theme.danger)),
+                if (code == 'mic_denied' && onOpenSettings != null)
+                  TextButton(
+                      onPressed: onOpenSettings,
+                      style: TextButton.styleFrom(foregroundColor: theme.primaryText),
+                      child: Text(copy.openSettings)),
+              ])),
+            if (recording != null)
+              _recordingBar(recording)
+            else
+              Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                if (onPickPhoto != null) ...[
+                  _outlined(Icons.add_rounded, copy.attach, () => _openAttachments(context)),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Focus(
+                    canRequestFocus: false,
+                    skipTraversal: true,
+                    onKeyEvent: _onKey,
+                    child: TextField(
+                      controller: controller,
+                      focusNode: focus,
+                      autofocus: autofocus,
+                      minLines: 1,
+                      maxLines: 5, // then it scrolls
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => onSend(),
+                      style: theme.text(size: 15),
+                      cursorColor: theme.primaryText,
+                      decoration: InputDecoration(
+                        hintText: hint,
+                        hintMaxLines: 1, // a wrapped hint at 200% text would eat the screen
+                        hintStyle: theme.text(size: 15, color: theme.muted),
+                        filled: true,
+                        fillColor: theme.surface,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        enabledBorder: OutlineInputBorder(
+                            borderRadius: radius, borderSide: BorderSide(color: theme.controlOutline)),
+                        focusedBorder: OutlineInputBorder(
+                            borderRadius: radius, borderSide: BorderSide(color: theme.primaryText, width: 1.5)),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              if (mic)
-                _outlined(Icons.mic_none_rounded, copy.recordVoice, onMic!)
-              else
-                IconButton.filled(
-                  onPressed: canSend ? onSend : null,
-                  tooltip: copy.send,
-                  style: IconButton.styleFrom(
-                    fixedSize: const Size.square(48),
-                    backgroundColor: theme.userBubble,
-                    disabledBackgroundColor: theme.userBubble.withValues(alpha: 0.4),
-                  ),
-                  // Up in both directions: nothing to mirror.
-                  icon: Icon(Icons.arrow_upward_rounded,
-                      color: canSend ? theme.onUserBubble : theme.onUserBubble.withValues(alpha: 0.7)),
-                ),
-            ]),
+                const SizedBox(width: 8),
+                if (mic)
+                  _outlined(Icons.mic_none_rounded, copy.recordVoice, canRecord ? onMic : null)
+                else
+                  _send(copy.send, canSend ? onSend : null),
+              ]),
           ]),
         ),
       ),
