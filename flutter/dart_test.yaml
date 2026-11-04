@@ -1,0 +1,3 @@
+tags:
+  # Pixel goldens: pinned to one Flutter version in CI (see .github/workflows/flutter.yml).
+  golden:

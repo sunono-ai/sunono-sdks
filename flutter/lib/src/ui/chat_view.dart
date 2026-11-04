@@ -6,7 +6,6 @@ import '../core/host.dart';
 import '../core/models.dart';
 import 'cards.dart';
 import 'copy.dart';
-import 'orb.dart';
 import 'theme.dart';
 
 /// The full assistant screen. Put it in a tab body or a route; it opens the
@@ -262,16 +261,10 @@ class _SunonoChatViewState extends State<SunonoChatView> {
 
     return Directionality(
       textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color.alphaBlend(theme.primary.withValues(alpha: 0.07), theme.background), theme.background],
-          ),
-        ),
+      child: ColoredBox(
+        color: theme.chatBackground,
         child: SafeArea(
-          top: widget.showHeader,
+          top: false, // the header pads under the status bar on its own color
           child: Column(children: [
             if (widget.showHeader)
               _Header(
@@ -279,7 +272,6 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                 title: _c.config.title(lang) ?? t.title,
                 avatarUrl: _c.config.avatarUrl,
                 subtitle: _c.paused ? t.humanOnline : t.online,
-                thinking: _c.busy,
                 onClose: widget.onClose,
               ),
             Expanded(child: body),
@@ -291,63 +283,83 @@ class _SunonoChatViewState extends State<SunonoChatView> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header(
-      {required this.theme,
-      required this.title,
-      required this.subtitle,
-      required this.thinking,
-      this.avatarUrl,
-      this.onClose});
+  const _Header({required this.theme, required this.title, required this.subtitle, this.avatarUrl, this.onClose});
   final SunonoTheme theme;
   final String title;
 
-  /// The shop's avatar; the orb shows while it loads or when it fails.
+  /// The shop's avatar; a flat placeholder shows while it loads or when it fails.
   final String? avatarUrl;
   final String subtitle;
-  final bool thinking;
   final VoidCallback? onClose;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
-        child: Row(children: [
-          if (avatarUrl == null)
-            PresenceOrb(theme: theme, size: 40, thinking: thinking)
-          else
-            ClipOval(
-              child: Image.network(
-                avatarUrl!,
-                width: 40,
-                height: 40,
-                fit: BoxFit.cover,
-                cacheWidth: (40 * MediaQuery.devicePixelRatioOf(context)).ceil(),
-                excludeFromSemantics: true,
-                loadingBuilder: (_, child, progress) =>
-                    progress == null ? child : PresenceOrb(theme: theme, size: 40, thinking: thinking),
-                errorBuilder: (_, __, ___) => PresenceOrb(theme: theme, size: 40, thinking: thinking),
-              ),
-            ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: theme.text(size: 17, weight: FontWeight.w700)),
-              Row(children: [
-                Container(width: 7, height: 7, decoration: BoxDecoration(color: theme.success, shape: BoxShape.circle)),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: Text(subtitle,
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.text(size: 12, color: theme.muted)),
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration:
+            BoxDecoration(color: theme.headerBackground, border: Border(bottom: BorderSide(color: theme.outline))),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
+            child: Row(children: [
+              if (avatarUrl == null)
+                _FlatAvatar(theme: theme, size: 40)
+              else
+                ClipOval(
+                  child: Image.network(
+                    avatarUrl!,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    cacheWidth: (40 * MediaQuery.devicePixelRatioOf(context)).ceil(),
+                    excludeFromSemantics: true,
+                    loadingBuilder: (_, child, progress) =>
+                        progress == null ? child : _FlatAvatar(theme: theme, size: 40),
+                    errorBuilder: (_, __, ___) => _FlatAvatar(theme: theme, size: 40),
+                  ),
                 ),
-              ]),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: theme.text(size: 17, weight: FontWeight.w700)),
+                  Row(children: [
+                    Container(
+                        width: 7, height: 7, decoration: BoxDecoration(color: theme.online, shape: BoxShape.circle)),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.text(size: 12, color: theme.muted)),
+                    ),
+                  ]),
+                ]),
+              ),
+              if (onClose != null)
+                IconButton(
+                  onPressed: onClose,
+                  icon: Icon(Icons.close_rounded, color: theme.muted),
+                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                ),
             ]),
           ),
-          if (onClose != null)
-            IconButton(
-              onPressed: onClose,
-              icon: Icon(Icons.close_rounded, color: theme.muted),
-              tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-            ),
-        ]),
+        ),
+      );
+}
+
+/// The assistant's flat stand-in avatar: a sparkle on a [SunonoTheme.primary]
+/// tint (shown when the shop has no avatar, and beside "thinking").
+class _FlatAvatar extends StatelessWidget {
+  const _FlatAvatar({required this.theme, required this.size});
+  final SunonoTheme theme;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+            color: Color.alphaBlend(theme.primary.withValues(alpha: 0.12), theme.surface), shape: BoxShape.circle),
+        child: Icon(Icons.auto_awesome, size: size * 0.5, color: theme.primaryText),
       );
 }
 
@@ -476,16 +488,16 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                gradient: theme.brandGradient,
+                color: theme.userBubble,
                 borderRadius: BorderRadiusDirectional.only(
                   topStart: Radius.circular(theme.radius),
                   topEnd: Radius.circular(theme.radius),
                   bottomStart: Radius.circular(theme.radius),
-                  bottomEnd: const Radius.circular(6),
+                  bottomEnd: const Radius.circular(4),
                 ),
               ),
               child: _BubbleText(
-                  text: m.text, theme: theme, color: theme.onPrimary, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
+                  text: m.text, theme: theme, color: theme.onUserBubble, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
             ),
             time(AlignmentDirectional.centerEnd),
           ]),
@@ -497,7 +509,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
     final children = <Widget>[];
     if (m.state == MessageState.thinking || m.state == MessageState.recovering) {
       children.add(Row(mainAxisSize: MainAxisSize.min, children: [
-        PresenceOrb(theme: theme, size: 26, thinking: true),
+        _FlatAvatar(theme: theme, size: 26),
         const SizedBox(width: 8),
         Flexible(
           child: Text(m.state == MessageState.recovering ? t.recovering : stageLabel(m.stage, widget.lang),
@@ -539,14 +551,13 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
         children.add(Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: theme.surface,
-            boxShadow: theme.glow,
-            border: Border.all(color: theme.primary.withValues(alpha: m.role == ChatRole.staff ? 0.3 : 0.08)),
+            color: theme.botBubble,
+            border: m.role == ChatRole.staff ? Border.all(color: theme.primary.withValues(alpha: 0.3)) : null,
             borderRadius: BorderRadiusDirectional.only(
               topStart: Radius.circular(theme.radius),
               topEnd: Radius.circular(theme.radius),
               bottomEnd: Radius.circular(theme.radius),
-              bottomStart: const Radius.circular(6),
+              bottomStart: const Radius.circular(4),
             ),
           ),
           child: _BubbleText(text: sanitizeReply(m.text), theme: theme, uiRtl: widget.lang == 'ar', onLink: c.openUrl),
@@ -757,8 +768,7 @@ class _Composer extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.surface,
           borderRadius: BorderRadius.circular(28),
-          boxShadow: theme.glow,
-          border: Border.all(color: theme.primary.withValues(alpha: 0.12)),
+          border: Border.all(color: theme.outline),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           if (photo is! PhotoIdle && image != null) ...[
@@ -905,8 +915,9 @@ class _Composer extends StatelessWidget {
                   child: Container(
                     width: 44,
                     height: 44,
-                    decoration: BoxDecoration(gradient: theme.brandGradient, shape: BoxShape.circle),
-                    child: Icon(Icons.arrow_upward_rounded, color: theme.onPrimary, textDirection: TextDirection.ltr),
+                    decoration: BoxDecoration(color: theme.userBubble, shape: BoxShape.circle),
+                    child:
+                        Icon(Icons.arrow_upward_rounded, color: theme.onUserBubble, textDirection: TextDirection.ltr),
                   ),
                 ),
               ),

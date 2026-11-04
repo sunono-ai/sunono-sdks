@@ -147,8 +147,7 @@ class ProductTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.surface,
           borderRadius: BorderRadius.circular(theme.radius - 4),
-          boxShadow: theme.glow,
-          border: Border.all(color: theme.primary.withValues(alpha: 0.08)),
+          border: Border.all(color: theme.outline),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -257,7 +256,7 @@ class ProductTile extends StatelessWidget {
       );
 
   Widget _noImage() => DecoratedBox(
-        decoration: BoxDecoration(gradient: theme.brandGradient.scale(0.15)),
+        decoration: BoxDecoration(color: Color.alphaBlend(theme.primary.withValues(alpha: 0.08), theme.surface)),
         child: Icon(Icons.shopping_bag_outlined, color: theme.primary.withValues(alpha: 0.5)),
       );
 
@@ -330,7 +329,7 @@ class _AddButton extends StatelessWidget {
               color: Colors.transparent,
               child: Ink(
                 height: 32,
-                decoration: BoxDecoration(gradient: theme.brandGradient, borderRadius: BorderRadius.circular(16)),
+                decoration: BoxDecoration(color: theme.primary, borderRadius: BorderRadius.circular(16)),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(16),
                   onTap: onTap,
@@ -372,7 +371,7 @@ class SunonoChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
         color: theme.surface,
-        shape: StadiumBorder(side: BorderSide(color: theme.primary.withValues(alpha: 0.35))),
+        shape: StadiumBorder(side: BorderSide(color: theme.chipOutline)),
         child: InkWell(
           customBorder: const StadiumBorder(),
           onTap: onTap,
@@ -388,7 +387,7 @@ class SunonoChip extends StatelessWidget {
       );
 }
 
-/// The gradient call-to-action that hands checkout to the host.
+/// The filled call-to-action that hands checkout to the host.
 class HandoffButton extends StatelessWidget {
   const HandoffButton({super.key, required this.theme, required this.label, required this.onTap});
   final SunonoTheme theme;
@@ -399,13 +398,7 @@ class HandoffButton extends StatelessWidget {
   Widget build(BuildContext context) => Material(
         color: Colors.transparent,
         child: Ink(
-          decoration: BoxDecoration(
-            gradient: theme.brandGradient,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(color: theme.primary.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))
-            ],
-          ),
+          decoration: BoxDecoration(color: theme.primary, borderRadius: BorderRadius.circular(24)),
           child: InkWell(
             borderRadius: BorderRadius.circular(24),
             onTap: onTap,
@@ -570,7 +563,6 @@ class CheckoutCardView extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.surface,
         borderRadius: BorderRadius.circular(theme.radius - 4),
-        boxShadow: theme.glow,
         border: Border.all(color: (placed ? theme.success : theme.primary).withValues(alpha: 0.25)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

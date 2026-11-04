@@ -1,3 +1,6 @@
+// Older analyzers flag the deprecated class's own uses (its State) here.
+// ignore_for_file: deprecated_member_use_from_same_package
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +9,9 @@ import 'theme.dart';
 
 /// The assistant's presence: a brand-gradient orb whose blobs drift slowly at
 /// rest and swirl while thinking. Static when the OS asks for reduced motion.
+///
+/// No longer used by the chat (0.3 is flat); kept for hosts that show it.
+@Deprecated('The 0.3 design is flat and no longer shows the orb. Removed in 1.0.')
 class PresenceOrb extends StatefulWidget {
   const PresenceOrb({super.key, required this.theme, this.size = 36, this.thinking = false});
 
