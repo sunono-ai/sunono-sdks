@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:sunono/src/core/api.dart';
 import 'package:sunono/src/core/format.dart';
 import 'package:sunono/src/core/models.dart';
 import 'package:sunono/src/core/sse.dart';
@@ -232,6 +235,87 @@ void main() {
         Cart.fromJson(fixture('turn_add_synced.json')['response']['action_data']['cart_summary'])!.extraLineCount, 0);
 
     expect((fixture('tap_request.json')['request'] as Map)['action'], 'add_to_cart');
+  });
+
+  test('v1.2: app checkout hands off to the host cart', () {
+    final f = fixture('turn_handoff_cart.json');
+    for (final k in ['unlinked', 'linked', 'site']) {
+      final c = f[k] as Map<String, dynamic>;
+      final e = c['expect'] as Map<String, dynamic>;
+      final r = TurnResult.fromJson(c['response'] as Map<String, dynamic>);
+      expect(r.handoff?.target, e['target'], reason: k);
+      expect(r.handoff?.url, e['url'], reason: k);
+      expect(r.checkout, isNull, reason: k);
+    }
+  });
+
+  test('v1.2: unlinked app cart refusals', () {
+    final f = fixture('turn_app_cart_unlinked.json');
+    final add = f['add'] as Map<String, dynamic>;
+    var e = add['expect'] as Map<String, dynamic>;
+    var r = TurnResult.fromJson(add['response'] as Map<String, dynamic>);
+    expect(r.cartUnlinked, e['cart_unlinked']);
+    expect(r.products, hasLength(e['products'] as int));
+    expect(r.products[0].sku, e['sku0']);
+    expect(r.cartPresent, e['cart_present']);
+    expect(r.handoff, e['handoff']);
+    final view = f['view'] as Map<String, dynamic>;
+    e = view['expect'] as Map<String, dynamic>;
+    r = TurnResult.fromJson(view['response'] as Map<String, dynamic>);
+    expect(r.cartUnlinked, e['cart_unlinked']);
+    expect(r.products, hasLength(e['products'] as int));
+    expect(r.cartPresent, e['cart_present']);
+    expect(r.handoff?.target, e['handoff_target']);
+    expect(TurnResult.fromJson(fixture('turn_search.json')['response'] as Map<String, dynamic>).cartUnlinked, isFalse);
+  });
+
+  test('v1.2: voice upload responses and the stream body', () async {
+    final f = fixture('upload_audio.json');
+    late http.Response next;
+    http.BaseRequest? seen;
+    String? body;
+    final api = SunonoApi(
+      shopKey: 'pk_test',
+      apiBase: 'https://api.test/api',
+      clientFactory: () => MockClient((req) async {
+        seen = req;
+        body = req.body;
+        return next;
+      }),
+    );
+    http.Response res(Map<String, dynamic> c) =>
+        http.Response(jsonEncode(c['response']), c['status'] as int, headers: {'content-type': 'application/json'});
+
+    final ok = f['success'] as Map<String, dynamic>;
+    next = res(ok);
+    final up = await api.uploadAudio('t', [1, 2, 3], mimeType: 'audio/mp4');
+    final e = ok['expect'] as Map<String, dynamic>;
+    expect(up.ref, e['ref']);
+    expect(up.transcript, e['transcript']);
+    expect(up.durationMs, e['duration_ms']);
+    expect(seen!.url.path, '/api/shops/pk_test/chat/upload');
+    expect(body, contains('name="audio"; filename="voice.m4a"'));
+
+    for (final c in (f['errors'] as List).cast<Map<String, dynamic>>()) {
+      next = res(c);
+      await expectLater(
+        api.uploadAudio('t', [1], mimeType: 'audio/mp4'),
+        throwsA(isA<SunonoHttpException>()
+            .having((x) => x.status, 'status', c['status'])
+            .having((x) => x.code, 'code', (c['response'] as Map)['error'])),
+      );
+    }
+
+    next = http.Response('data: {"type":"done","reply":"ok"}\n\n', 200);
+    final want = f['stream_request'] as Map<String, dynamic>;
+    await api
+        .chatStream('t', want['message'] as String,
+            lang: want['lang'] as String,
+            audioRef: want['audio_ref'] as String,
+            clientMessageId: want['client_message_id'] as String)
+        .toList();
+    expect(seen!.url.path, '/api/shops/pk_test/chat/stream');
+    expect(jsonDecode(body!), want);
   });
 
   test('format rules', () {

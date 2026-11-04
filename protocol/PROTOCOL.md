@@ -1,8 +1,10 @@
-# Sunono Client Protocol — v1.1
+# Sunono Client Protocol — v1.2
 
 The wire contract between a Sunono chat client (Flutter, React Native, Kotlin, Swift, and the web widget) and the Sunono backend. v1 is what the production web widget speaks. The backend treats every field here as **never-break**: fields may be added, never removed or renamed.
 
 **v1.1** is purely additive. Every v1.1 field is optional, and a client that ignores all of them still works. v1.1 adds: `channel: "app"` on init (§2), the `platform` config parameter, `app` block and `platform_disabled` (§3), structured taps, `client_message_id` and `403 platform_disabled` (§4), `cart_relink` and `order_ids` (§4.1), `remote.extra_lines` (§5.2), `503 image_unavailable` (§9) and `POST /chat/forget` (§11).
+
+**v1.2** is additive too, and every v1.2 field is optional. It adds, for `channel: "app"` tokens: checkout handed to the host cart page (`checkout_handoff.target: "cart"`, §6) and the unlinked-cart refusals (`app_cart_unlinked`, §6); the app card allow-list with a shopper-safe `external_url` (§5.1); the history row `action` and `audio` (§7). For widget and app tokens: voice notes (multipart `audio` upload, `audio_ref` on `/chat/stream`, their error codes, §4.0b and §9).
 
 Every SDK must pass the fixtures in [`fixtures/`](fixtures/). They are the conformance suite.
 
@@ -12,7 +14,7 @@ Every SDK must pass the fixtures in [`fixtures/`](fixtures/). They are the confo
 - **Shop key.** The shop's publishable key, `pk_…`, is the `{shop}` path segment and the `key` query/body field. It is public and safe to ship in an app.
 - **Headers on every request:**
   - `Origin: <appOrigin>`. Native clients only; see §1.
-  - `X-Sunono-Client: <sdk>/<version> (<platform>)`, e.g. `sunono-flutter/0.2.0 (ios)`; `<platform>` is `ios` or `android`. Informational.
+  - `X-Sunono-Client: <sdk>/<version> (<platform>)`, e.g. `sunono-flutter/0.3.0 (ios)`; `<platform>` is `ios` or `android`. Informational.
   - `Authorization: Bearer <token>` on every endpoint that requires it.
 - **Money.**
   - Prices arrive as JOD numbers (`price_jod: 12.5`) or integer fils (`total_fils: 16500`, 1 JOD = 1000 fils).
@@ -93,9 +95,9 @@ Auth: Bearer. Rate limit: 20 per minute.
 
 The response is one JSON object, the same as the `done` frame below without `type`.
 
-The server finishes the turn even if the client disconnects. Both the inbound and the outbound message are saved when the turn ends, and the reply is also published as a live `message.new` (§7). `image_ref` is rejected here (400). No stage events: show a local "thinking" state.
+The server finishes the turn even if the client disconnects. Both the inbound and the outbound message are saved when the turn ends, and the reply is also published as a live `message.new` (§7). `image_ref` and `audio_ref` are rejected here (400). No stage events: show a local "thinking" state.
 
-### 4.0b `POST /shops/{shop}/chat/stream` — photo turns, and the web widget
+### 4.0b `POST /shops/{shop}/chat/stream` — photo and voice turns, and the web widget
 
 Auth: Bearer. Rate limit: 20 per minute.
 
@@ -107,9 +109,12 @@ Request:
   "lang": "ar",
   "synthetic": false,
   "image_ref": "<from /chat/upload, optional>",
+  "audio_ref": "<from /chat/upload, optional (v1.2)>",
   "client_message_id": "<uuid v4, optional>"
 }
 ```
+
+- **`audio_ref`** (v1.2). Sends a voice note (§9). `message` may then be `""`: the note's transcript is the shopper's text, and typed text, if any, is appended after it on a new line. Sending both `image_ref` and `audio_ref` is a `400`, and so is an unknown, expired or other shopper's `audio_ref`. See `fixtures/upload_audio.json` (`stream_request`).
 
 - **`channel`.** Do not send it on chat requests; the channel comes from the token (`/shops/init`, §2).
 - `product_id` (optional) is a card's `public_id`, so a question is scoped to that product.
@@ -169,7 +174,8 @@ HTTP errors arrive before the stream:
 | `has_more` | bool | A next page exists. Show a "show more" chip that sends the synthetic message `ورجيني كمان` (ar) / `Show me more` (en). |
 | `cart_summary` or `cart` | `Cart` (§5.2) | Authoritative cart snapshot after this turn. Whichever is present wins; absent means unchanged. |
 | `cart_sync` | `{"mutated": true}` | The bot changed a synced storefront cart this turn. Tell the host to refresh its cart. |
-| `checkout_handoff` | `{"url": "https://…"}` | Synced shop: finish checkout in the host (§6). |
+| `checkout_handoff` | `{"url"?: "https://…", "target"?: "cart"}` | Finish checkout in the host (§6). v1.2 `target: "cart"`: open the host's cart page; ignore `url`. No `target` (or any other value): the site checkout at `url`, which must be https. |
+| `app_cart_unlinked` / `status: "app_cart_unlinked"` | truthy / string | v1.2, app tokens only. The shopper's storefront cart is not linked, so nothing was added, removed or shown in chat (§6). |
 | `order_collect` + `missing_fields`, `known`, `field_notes` | §5.3 | Checkout: collecting delivery details. |
 | `order_confirm` / `order_amend` + `details`, `order_total_text`, `vat_text`, `savings_text`, `service_fee_text`, `field_notes` | §5.3 | Checkout read-back (confirm) or edit (amend). |
 | `order_placed` + `order` | §5.3 | Order placed in chat. |
@@ -177,7 +183,7 @@ HTTP errors arrive before the stream:
 | `cart_relink` | truthy | v1.1. The link to the shopper's storefront cart was dropped. Re-run the cart binding (§8). |
 | `order_ids` | `{public_id, number, store_order_id, source}` | v1.1. Ids of an order placed this turn. `source` is `chat` or `storefront`; every key is optional. `number` is the shopper-facing order number. |
 
-The four checkout keys are mutually exclusive per turn. Precedence when reading: `order_placed` > `order_confirm` > `order_amend` > `order_collect`. Every other `action_data` key is internal and must be ignored.
+The four checkout keys are mutually exclusive per turn. An app token (v1.2) never receives them from a new turn (§6); restored history may still hold older ones (§7). Precedence when reading: `order_placed` > `order_confirm` > `order_amend` > `order_collect`. Every other `action_data` key is internal and must be ignored.
 
 ### 4.2 Stage labels
 
@@ -204,6 +210,8 @@ The four checkout keys are mutually exclusive per turn. Precedence when reading:
 
 ### 5.1 ProductCard
 Read only these fields. Others may be present and must be ignored.
+
+**App tokens (v1.2)** get only the keys in this table (live turns and history alike), plus `on_sale`. `external_url` is the shopper-facing storefront page or `null`, never a back-office link.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -282,6 +290,14 @@ The server decides per turn. Clients render whatever arrives.
   - The cart is the shopper's real storefront cart.
   - On `checkout_handoff.url`, show a "Complete order" button that hands checkout to the host. Native host: open its own checkout. Web: navigate to the URL.
   - Refresh the host cart on `cart_sync.mutated` and on live `cart.updated`.
+- **App checkout** (v1.2, `channel: "app"` tokens, every shop). Native apps check out in their own cart page, never in chat:
+  - The server never collects delivery details, reads an order back, asks for a one-time code or places an order for an app token. A checkout request answers `checkout_handoff: {"target": "cart"}` with a fixed reply. Show an «افتح السلة» / "Open cart" button that opens the host's cart page. A linked shopper may also get the site `url`; ignore it for `target: "cart"`. See `fixtures/turn_handoff_cart.json`.
+  - Cancelling an order already placed stays a chat flow.
+  - **Unlinked cart.** The bot adds only to a linked storefront cart (§8). While the app shopper is not linked:
+    - An add (typed or a card tap) adds nothing. It answers `status: "app_cart_unlinked"`, `app_cart_unlinked: true` and the product card(s), so the shopper can add from the product page. In a mixed turn with a product page, `status` keeps the page's value and only `app_cart_unlinked` is set.
+    - A view, remove or quantity change answers `app_cart_unlinked: true` plus `checkout_handoff: {"target": "cart"}`, with no `cart`.
+    - After a refusal, a client should open the product page from the card's Add button until the cart links. See `fixtures/turn_app_cart_unlinked.json`.
+    - History `cart` is `null`, and `GET /chat/cart` answers `{"cart": null, "linked": false}`.
 
 ## 7. History and live events
 
@@ -293,7 +309,9 @@ The server decides per turn. Clients render whatever arrives.
     { "role": "user|bot", "sender": "user|bot|staff", "text": "…",
       "products": [ProductCard], "has_more": false, "image": "https://…|null",
       "msg_ref": "…|null", "ts": "2026-10-30T22:23:50+00:00",
-      "checkout_handoff": {"url": "…"} }
+      "checkout_handoff": {"url": "…"},
+      "audio": {"url": "https://…", "duration_ms": 4200},
+      "action": { … } }
   ],
   "bot_paused_at": "<iso>|null",
   "cart": Cart|null,
@@ -307,6 +325,9 @@ The server decides per turn. Clients render whatever arrives.
 - **`cart`** is the cart badge state. It may be `stale`.
 - **`cart_linked`** means the shopper's cart is a synced storefront cart.
 - `image` is relative (`/api/...`) in local development; resolve it against the API origin.
+- **`checkout_handoff`** may carry `target: "cart"` (v1.2, §6).
+- **`audio`** (v1.2). The row is a shopper voice note: `url` is the stored note (mp3), `duration_ms` is its measured length (`null` on old rows), and `text` is its transcript. Resolve a relative `url` like `image`. Play only https urls on the shopper's own rows.
+- **`action`** (v1.2, app tokens only). Every reply row (`role: "bot"`, bot or staff) carries `action`, which may be `{}`. It holds the subset of these keys that the live turn's `action_data` had, with the same values: `reply_lang`, `order_collect`, `known`, `missing_fields`, `field_notes`, `order_confirm`, `order_amend`, `details`, `order_total_text`, `vat_text`, `savings_text`, `service_fee_text`, `order_placed`, `order`, `checkout_handoff`, the cancel flags (`cancelled`, `cancelled_before_store`, `cancel_pending`, `cancel_pending_store`, `cancel_refused`, `cancel_store_error`, `cancel_aborted`) and `app_cart_unlinked`. It also holds `order_ids` (§4.1) when the row's own `order` names an order. Read it exactly like a live `action_data`, so a restored thread renders the same cards as the live one (checkout cards, the placed order and its "Order details" chip, the hand-off button). User rows have no `action`. A row without `action` (older server, web token) parses as before. See `fixtures/history_app.json`.
 
 ### Live stream
 1. `POST /shops/{shop}/chat/subscribe-ticket` (Bearer, body `{}`) → `{"ticket":"…"}`. Single use, valid 60 s.
@@ -354,9 +375,11 @@ Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on cha
 - **When to bind.** Probe (never creates a cart) when the chat opens or resumes, and after the host's login, logout or cart replacement. Ensure (creates the storefront cart if missing) at most once per open, before the first message.
 - **Clock skew.** Get a fresh proof for every attempt and never cache one. Clock skew is tolerated up to 60 s.
 
-## 9. Photos — `POST /shops/{shop}/chat/upload` (Bearer, multipart `image`; 10 per minute)
+## 9. Photos and voice notes — `POST /shops/{shop}/chat/upload` (Bearer; 10 per minute)
 
-- **Success:** `200 {"image_ref":"…"}`. Then send a message with `image_ref`; a caption is required.
+### Photos (multipart `image`)
+
+- **Success:** `200 {"image_ref":"…"}` (anonymous shopper tokens get only `image_ref`). Then send a message with `image_ref`; a caption is required.
 - **Errors:**
   - `413 image_too_large`: over 5 MB
   - `400 invalid_image`
@@ -365,12 +388,35 @@ Returns `{"cart": Cart|null, "linked": bool}`. Synced carts only. Call it on cha
   - `403 customer_blocked`
 - Resize to ≤ 1600 px on the long edge and JPEG ≈ 0.85 before upload.
 
+### Voice notes (v1.2, multipart `audio`)
+
+The upload transcribes the note at once. It shares the photo rate limit, the kill switch and the Origin rules.
+
+- **Format.** The server judges the bytes, not the declared type. It accepts mp4/m4a/3gp, AAC (ADTS), ogg/opus, webm, mp3 and wav. Record AAC in m4a, mono, at 64 kbps or less.
+- **Caps.** The file may be at most 1.5 MB (1,572,864 bytes). The note may be at most 60 s, as measured by the server, with 0.5 s of grace. Check both on the client before uploading, and refuse notes under 1 s.
+- **Success:** `200 {"audio_ref": "…", "transcript": "…", "duration_ms": 4200}`. Show the transcript on the shopper's bubble, then send `audio_ref` on `/chat/stream` (§4.0b). The `audio_ref` is valid for 1 hour and only for this shopper. It is not an `image_ref`. After it expires, upload again.
+- **Errors** (JSON `{"error": code}`; `voice_busy` and `voice_unavailable` also carry a shopper-language `message`). Nothing is stored for any of them:
+
+  | HTTP | `error` | Meaning | Retry? |
+  |---|---|---|---|
+  | `413` | `audio_too_large` | Over 1.5 MB | No |
+  | `413` | `audio_too_long` | Over 60 s | No |
+  | `400` | `invalid_audio` | Not an audio container, or it can't be decoded | No |
+  | `422` | `audio_unclear` | No speech in the transcript | No: ask the shopper to type or record again |
+  | `429` | `voice_busy` | The shop's hourly voice-note limit is reached | No: ask the shopper to type |
+  | `503` | `voice_unavailable` | Voice notes are switched off | No: hide the mic for this session |
+  | `503` | `audio_unavailable` | Speech-to-text or storage failed | Not automatically: the shopper can record again later |
+  | `403` | `customer_blocked`, `platform_disabled` | As for photos and turns | No |
+  | `429` | *(none)* | Rate limited | Not automatically |
+
+- **Not idempotent.** Every upload is a new, paid transcription, and a `client_message_id` doesn't dedupe uploads. Re-upload automatically at most once, and only when the request got **no HTTP response**. A `401` (or `422` without an `error`) is re-auth and may be retried once after `/shops/init` (§2), since it was rejected before any work. Show every other HTTP error to the shopper and let them decide. Sending the same note again on `/chat/stream` with the same `client_message_id` is safe (§10). See `fixtures/upload_audio.json`.
+
 ## 10. Delivery semantics (mobile)
 
 Without a `client_message_id`, resending can double an action ("add 2"). Native clients send one on every turn (§4.0b); with it, a resend of the same message is safe: `409 turn_in_progress` while the turn runs, then an identical `200` replay. The recovery flow below is the fallback for servers or messages without it.
 
 - **`/chat/stream` (§4.0b) also finishes the turn if the client disconnects mid-turn**: the turn runs server-side and is saved. Recover through history, or resend with the same `client_message_id` for a replay. Older servers cancelled the turn on disconnect (nothing saved, though cart side effects may have happened), so a client must not assume a dropped stream left no trace. Native clients use it only for photo turns.
-- **Automatic resend is allowed only on `401`/`422`** (re-auth), which are rejected before any work.
+- **Automatic resend is allowed only on `401`/`422`** (re-auth), which are rejected before any work. Uploads have their own rule (§9).
 - **Any other failure without a response → "recovering":**
   - Re-fetch history at about 4 s, 12 s and 30 s. Both rows of a finished turn appear together.
   - A user row with our text that the screen doesn't account for appears → the turn happened; adopt the server thread. A row is accounted for when its own `msg_ref` is on screen, or when the reply right after it is (`/chat` returns only the bot's `msg_ref`). Never compare device time with server `ts`.

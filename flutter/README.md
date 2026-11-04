@@ -1,6 +1,6 @@
 # sunono
 
-The Sunono AI shopping assistant for Flutter apps. It ships as a ready chat screen that searches your catalog, fills the cart, runs checkout and tracks orders, in Ammani Arabic or English. Product, cart and checkout taps are handed back to your app's own screens.
+The Sunono AI shopping assistant for Flutter apps. It ships as a ready chat screen that searches your catalog, fills the cart and tracks orders, in Ammani Arabic or English, by text, photo or voice note. Product, cart and checkout taps are handed back to your app's own screens: checkout always happens in your app's cart page.
 
 - Pure Dart, one dependency (`http`), no native code. Works with Swift Package Manager-only iOS projects and AGP 9.
 - Arabic-first: RTL, Latin digits, mixed-direction text.
@@ -60,6 +60,52 @@ Sunono.open(context, initialMessage: 'Is this available in size 42?');
 ```
 
 Without a `theme`, the chat uses the dashboard's brand color and light/dark scheme over your Material theme, and the header shows the shop's avatar. Pass `autofocus: true` to raise the keyboard when the chat opens (off by default, so a Chat tab doesn't pop it).
+
+## Header, welcome and quick replies
+
+The header shows the shop's avatar, its name and an online status. Pass `onBack` to show a back button (in the `Sunono.open` sheet it closes the sheet). Its ⋮ menu has "Talk to our team" and your own `menuItems`. A welcome card opens the thread; its copy can be set per language:
+
+```dart
+Sunono.view(
+  onBack: () => Navigator.of(context).pop(),
+  menuItems: [SunonoMenuItem(label: 'Help', icon: Icons.help_outline, onTap: openHelp)],
+  welcomeTitle: {'ar': 'أهلاً فيك 👋', 'en': 'Welcome 👋'},
+  welcomeSubtitle: {'ar': 'اسألني عن أي منتج', 'en': 'Ask me about any product'},
+);
+```
+
+Quick replies are the chips on the empty thread and under the newest reply (at most 3 there). The defaults are «شو العروض؟» / "Browse offers" and «احكي مع الفريق» / "Talk to our team". Pass your own per language to `Sunono.init`; `[]` shows none, and `action` runs your code instead of sending a message:
+
+```dart
+Sunono.init(
+  shopKey: 'pk_live_…',
+  storage: MySecureStorage(),
+  quickReplies: {
+    'ar': [
+      SunonoQuickReply('أفكار هدايا', Icons.redeem, 'عندكم أفكار هدايا؟'),
+      SunonoQuickReply('العروض', Icons.local_offer_outlined, '', action: () => router.push('/offers')),
+    ],
+    'en': [SunonoQuickReply('Gift ideas', Icons.redeem, 'Any gift ideas?')],
+  },
+);
+```
+
+`starterPrompts` is deprecated: it still shows text chips on the empty thread when `quickReplies` has none for that language.
+
+## Theme
+
+The chat is flat (no gradients or shadows): white header and assistant bubbles, a page tinted with your brand color, and your brand color on the shopper's bubbles, the send button and the chips. Every color is contrast-checked (text at 4.5:1, controls at 3:1), so a light or very dark brand color is adjusted rather than used as is.
+
+```dart
+// From your Material theme: primary → shopper bubble, send and chips; surface → header and assistant bubbles;
+// outlineVariant → hairlines; your text theme's font family and fallbacks carry over.
+Sunono.view(theme: SunonoTheme.fromMaterial(Theme.of(context)));
+
+// From one brand color:
+Sunono.view(theme: SunonoTheme.flat(primary: const Color(0xFF57227D), dark: false));
+```
+
+Any token can be overridden with `copyWith` or the `SunonoTheme(...)` constructor: `chatBackground`, `headerBackground`, `botBubble`, `userBubble`, `onUserBubble`, `outline`, `online`, `chipOutline`, `radius` (18). `PresenceOrb`, `brandGradient` and `glow` are deprecated and are removed in 1.0.
 
 ## Intents
 
@@ -126,11 +172,17 @@ If your shop uses Sunono's Magento cart sync, the bot fills the shopper's real s
 3. Call `Sunono.refreshCartBinding()` after login, logout or a cart merge. If the server reports that the cart was replaced (a relink), the SDK drops its binding and binds again on the next turn, so a stale cart is never written to.
 4. React to `CartChangedEvent(:final fromSync)`. `fromSync == true` means the **storefront** cart changed (the bot added or removed an item, a live update arrived, or a pull returned a different linked cart): refresh your own cart screen. It is `false` for a badge-only change. Call `Sunono.refreshCart()` to pull the latest cart yourself, e.g. when your cart screen opens.
 
-Checkout then hands off to your app (`CheckoutIntent`) instead of the chat. Set `nativeCheckout: true` when your handler opens a native checkout screen; the button then reads «كمّل الطلب» / "Complete your order" instead of the default «كمّل الطلب بالموقع» / "Complete order on the site".
+## Checkout
+
+The assistant never checks out inside an app. When the shopper is ready, it answers with an «افتح السلة» / "Open cart" button that sends `OpenCartIntent`: open your cart page, and the shopper checks out there. If you decline it and pass `nativeCheckout: true`, the SDK sends `CheckoutIntent()` with a `null` url instead.
+
+The bot only adds to a **linked** storefront cart. Without a `cartBridge`, or while its bind fails, a card's **Add** opens the product (`OpenProductIntent`), so the shopper adds it from your product page and your cart stays the truth.
+
+`nativeCheckout: true` also changes the label of a site checkout hand-off (`CheckoutIntent(url)`, from servers before protocol v1.2) from «كمّل الطلب بالموقع» / "Complete order on the site" to «كمّل الطلب» / "Complete your order".
 
 ## Photos
 
-Pass `pickImage` to `Sunono.init` to show the photo button. Return a JPEG resized to at most 1600 px (e.g. `image_picker` with `maxWidth: 1600, imageQuality: 85`). Add the camera and photo-library permission strings to your app.
+Pass `pickImage` to `Sunono.init` to show the `+` button in the composer. It opens an attach sheet with «صورة» / "Photo", and picking that calls `pickImage`. Return a JPEG resized to at most 1600 px (e.g. `image_picker` with `maxWidth: 1600, imageQuality: 85`). Add the camera and photo-library permission strings to your app.
 
 The photo uploads as soon as it is picked, with a progress ring on the preview; JPEG, PNG and WebP up to 5 MB are accepted. Errors (too large, unreadable, refused, photos unavailable, offline) show under the preview with a Retry where it can help, and a caption is required to send. Headless: `controller.attachPhoto(image)`, `controller.photo` (`PhotoIdle | PhotoUploading | PhotoReady | PhotoFailed`), `retryPhoto()`, `removePhoto()`; `send(text)` carries a ready photo.
 
@@ -238,8 +290,8 @@ Use this table for your App Store privacy label and Google Play Data Safety form
 | Messages | Always | Answering the shopper |
 | Photos | Only when the shopper attaches one (`pickImage`) | Finding similar products |
 | Voice recordings and their transcripts | Only when the shopper records a voice note (`voiceRecorder`) | Understanding the request (speech-to-text) |
-| Name, phone, address, email | Only for shops that run checkout or order tracking in the chat | Placing, delivering and tracking the order |
-| Purchase history | Orders placed through the assistant | Order tracking, reordering |
+| Name, phone, address, email | Only when the shopper gives them in the chat, e.g. to track an order (checkout runs in your cart page) | Tracking and supporting the order |
+| Purchase history | Orders the shopper asks the assistant about | Order tracking, reordering |
 
 This data is processed by Sunono and its subprocessors: AI model providers, message-safety checking, SMS for one-time codes (when the shop enables it) and cloud storage for photos and voice notes; voice notes also go to a speech-to-text provider. See [Sunono's privacy policy](https://dashboard.sunono.ai/privacy-policy) for the current list. It is linked to the anonymous ID, not to an account of yours, unless the shopper types identifying details into the chat. The SDK collects no advertising ID and no device identifiers, and does no tracking across apps.
 

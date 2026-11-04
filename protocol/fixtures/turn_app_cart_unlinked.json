@@ -1,0 +1,45 @@
+{
+  "description": "v1.2 (PROTOCOL §6): an app shopper whose storefront cart is not linked asked to add. Nothing was added. The product card is attached so the shopper can add it from its page. The view-cart and remove refusals carry app_cart_unlinked plus a cart handoff instead of products.",
+  "add": {
+    "response": {
+      "reply": "ما قدرت أوصل لسلة التطبيق هلّق — اضغط على المنتج وضيفه من صفحته 👇",
+      "session_id": "s1",
+      "msg_ref": "msg_u1",
+      "action_data": {
+        "reply_lang": "ar",
+        "status": "app_cart_unlinked",
+        "app_cart_unlinked": true,
+        "products": [
+          {
+            "public_id": "prod_a",
+            "sku": "SKU-A1",
+            "title_ar": "تمر مجهول",
+            "title_en": "Medjool Dates",
+            "price_jod": 8.0,
+            "discount_jod": null,
+            "in_stock": true,
+            "low_stock_qty": null,
+            "has_image": true,
+            "img_urls": ["https://images.example.com/d.jpg"],
+            "external_url": "https://shop.example/dates",
+            "metadata": {}
+          }
+        ]
+      }
+    },
+    "expect": {"cart_unlinked": true, "products": 1, "sku0": "SKU-A1", "cart_present": false, "handoff": null}
+  },
+  "view": {
+    "response": {
+      "reply": "Your cart is in the app 👇",
+      "session_id": "s1",
+      "msg_ref": "msg_u2",
+      "action_data": {
+        "reply_lang": "en",
+        "app_cart_unlinked": true,
+        "checkout_handoff": {"target": "cart"}
+      }
+    },
+    "expect": {"cart_unlinked": true, "products": 0, "cart_present": false, "handoff_target": "cart"}
+  }
+}

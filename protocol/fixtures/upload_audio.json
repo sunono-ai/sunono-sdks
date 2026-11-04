@@ -1,0 +1,26 @@
+{
+  "description": "v1.2 voice notes (PROTOCOL §9): POST /shops/{shop}/chat/upload with multipart field `audio`, then the /chat/stream body that sends the note. The upload transcribes at once (a paid call) and is not idempotent.",
+  "success": {
+    "status": 200,
+    "response": {"audio_ref": "ar_test_1", "transcript": "بدي واقي شمس للأطفال", "duration_ms": 4200},
+    "expect": {"ref": "ar_test_1", "transcript": "بدي واقي شمس للأطفال", "duration_ms": 4200}
+  },
+  "errors": [
+    {"status": 413, "response": {"error": "audio_too_large"}},
+    {"status": 413, "response": {"error": "audio_too_long"}},
+    {"status": 400, "response": {"error": "invalid_audio"}},
+    {"status": 422, "response": {"error": "audio_unclear"}},
+    {"status": 503, "response": {"error": "audio_unavailable"}},
+    {"status": 503, "response": {"error": "voice_unavailable", "message": "Voice messages aren't available right now 🙏 Please type your message and I'll help."}},
+    {"status": 429, "response": {"error": "voice_busy", "message": "Voice messages are busy right now 🙏 Please type your message or try again in a bit."}},
+    {"status": 403, "response": {"error": "customer_blocked"}},
+    {"status": 403, "response": {"error": "platform_disabled"}}
+  ],
+  "stream_request": {
+    "message": "",
+    "lang": "ar",
+    "synthetic": false,
+    "client_message_id": "7b1d6f2e-3c4a-4b5d-8e6f-1a2b3c4d5e71",
+    "audio_ref": "ar_test_1"
+  }
+}

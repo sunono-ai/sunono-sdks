@@ -14,12 +14,29 @@ void main() {
     // Demo only: forgets the shopper on every launch. Use secure storage in a real app.
     storage: MemoryStorage(),
     // cartBridge: YourMagentoBridge(), // Magento cart sync
+    // Voice notes: implement these with any plugin (see the README's
+    // `record` + `just_audio` example), then:
+    // voiceRecorder: RecordVoice(),
+    // audioPlayer: JustAudioPlayer(),
+    // onOpenSettings: openAppSettings, // permission_handler
+    quickReplies: {
+      'ar': [
+        SunonoQuickReply(
+            'شو العروض؟', Icons.local_offer_outlined, 'شو العروض عندكم؟'),
+        SunonoQuickReply('أفكار هدايا', Icons.redeem, 'عندكم أفكار هدايا؟'),
+      ],
+      'en': [
+        SunonoQuickReply('Browse offers', Icons.local_offer_outlined,
+            'What offers do you have?'),
+        SunonoQuickReply('Gift ideas', Icons.redeem, 'Any gift ideas?'),
+      ],
+    },
     onIntent: (intent) {
       switch (intent) {
         case OpenProductIntent(:final sku, :final title):
           debugPrint('open product $sku ($title)');
         case OpenCartIntent():
-          debugPrint('open cart');
+          debugPrint('open cart'); // checkout happens on your cart page
         case CheckoutIntent():
           debugPrint('open native checkout');
         case OpenOrderIntent(:final storeOrderId?):
@@ -63,7 +80,15 @@ class _ExampleAppState extends State<ExampleApp> {
                   )
                 : Sunono.view(
                     theme: SunonoTheme.fromMaterial(Theme.of(context),
-                        accent: const Color(0xFFF2A900))),
+                        accent: const Color(0xFFF2A900)),
+                    onBack: () => setState(() => _tab = 0),
+                    menuItems: [
+                      SunonoMenuItem(
+                          label: 'Help',
+                          icon: Icons.help_outline,
+                          onTap: () => debugPrint('open help')),
+                    ],
+                  ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _tab,
               onDestinationSelected: (i) => setState(() => _tab = i),

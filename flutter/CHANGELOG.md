@@ -1,3 +1,54 @@
+## 0.3.0
+
+Protocol v1.2 (additive). A flat chat design, history that restores every card, checkout through your app's cart page, and voice notes. Breaking changes first.
+
+### Breaking
+
+- **Checkout opens your cart page.** With a v1.2 server, the assistant never checks out in an app: it never collects delivery details, reads the order back, asks for a code or places the order. When the shopper wants to check out, the reply carries an «افتح السلة» / "Open cart" button, which sends `OpenCartIntent`. If you decline it and set `nativeCheckout`, the SDK sends `CheckoutIntent()` with a `null` url. Otherwise it reports `ErrorEvent(UnhandledIntent(OpenCartIntent))` and the sheet stays open. Handle `OpenCartIntent`.
+- `controller.openCart()` (the cart bar) now always tries `OpenCartIntent` first, linked or not. The assistant shows the cart in the chat only when you decline it.
+- **Add without a linked cart opens the product.** The bot adds only to a linked storefront cart. While the shopper isn't linked (no `cartBridge`, or its bind failed), a card's **Add** sends `OpenProductIntent`. If you decline it, the SDK asks the assistant about the product; it never sends an add. After the server reports an unlinked cart (`app_cart_unlinked`), the next Add opens the product too.
+- `ChatMessage.handoffUrl` is now a read-only getter over the new `ChatMessage.handoff`. Assign `handoff` instead. The `handoffUrl:` constructor parameter still works but is deprecated.
+- **Quick replies replace the starter chips.** The defaults are now «شو العروض؟» / "Browse offers" and «احكي مع الفريق» / "Talk to our team". They show on the empty thread and also under the newest assistant reply (at most 3) while the chat is idle. `starterPrompts` still works, but only on the empty thread, and only where `quickReplies` has nothing for that language. Pass `quickReplies: {'ar': [], 'en': []}` to show no chips.
+- **New header.** It has a 44 dp avatar (the shop's `avatar_url`, else a monogram), the title, and a status row: «متصل • جاهزين نساعدك» / "Online • Here to help", «فريق المتجر معك» while staff have the chat, or «غير متاح هلّق» / "Unavailable right now". The leading button is now a back button: it calls `onBack` in `Sunono.view` and closes the `Sunono.open` sheet. A ⋮ menu has the built-in "Talk to our team" and your `menuItems`.
+- **Photos.** The photo button is now a `+` that opens an attach sheet with one row, «صورة» / "Photo". `pickImage` runs after the shopper picks that row.
+- **Flat theme defaults.** No gradients, glows or shadows. The bubble and card `radius` default is now 18 (was 20), and the bubble tail corner is 4. Default `muted` is `#6E6B78`, `success` is `#06774F` and `danger` is `#C02048`, so they reach 4.5:1 on the chat background. Text on a brand color can now be black when neither white nor near-black reaches 4.5:1. The user bubble is lifted toward white or black when the brand color is below 3:1 against the page. `SunonoTheme.fromMaterial` now takes the header and bot bubbles from `surfaceContainerLowest` (light) or `surfaceContainerHigh` (dark), and its `primaryText` and `muted` are now contrast-adjusted. If you pinned goldens of the chat, regenerate them.
+
+### Deprecated (removed in 1.0)
+
+- `PresenceOrb`. The header and typing row no longer use it.
+- `SunonoTheme.brandGradient` and `SunonoTheme.glow`.
+- `Sunono.init(starterPrompts:)` and `SunonoChatController(starterPrompts:)`. Use `quickReplies`.
+- `ChatMessage(handoffUrl:)`. Use `handoff`.
+
+### Added
+
+- **Voice notes**, through your own recorder. The SDK still ships no native code.
+  - `Sunono.init(voiceRecorder:, audioPlayer:, onOpenSettings:)`, and the same on `SunonoChatController`.
+  - New types: `SunonoVoiceRecorder` (`start`, `levels`, `stop`, `cancel`), `SunonoAudio` and the optional `SunonoAudioPlayer`. The README has a host implementation with `record` and `just_audio`.
+  - Tap to record. A recording bar shows the timer, levels, cancel and send. The server transcribes the note, and the bubble shows «سمعناك: …» / "We heard: …".
+  - Limits: a note is 1–60 s and at most 1.5 MB (it auto-sends at 60 s). Record AAC in m4a, mono, at 64 kbps or less.
+  - Error codes, each with Arabic and English copy: `mic_denied`, `voice_failed`, `voice_too_short`, `audio_too_large`, `audio_too_long`, `audio_unclear`, `invalid_audio`, `audio_unavailable`, `voice_busy` and `voice_unavailable`. `voice_unavailable` hides the mic until the next `Sunono.init`. Retry appears only where it can help, because each upload is a paid transcription.
+  - A recording is cancelled, and playback stopped, when the shopper leaves the chat, the app goes to the background, and on `reset()`, the kill switch and dispose.
+  - Headless: `controller.voice` (`VoiceIdle | VoiceRecording | VoiceUploading | VoiceFailed`), `startVoice()`, `stopVoice()` (sends), `cancelVoice()`, `recording`, `canRecord`, `voiceAvailable`, `toggleVoicePlayback(message)`, `stopVoicePlayback()`, `playingVoice`, and `ChatMessage.isVoice`, `audioUrl`, `localAudio`, `audioDuration`, `retryable`.
+- `SunonoQuickReply(label, icon, message, {action})` and `Sunono.init(quickReplies:)`, per language. `action` runs your callback instead of sending.
+- `Sunono.view(onBack:, menuItems:, welcomeTitle:, welcomeSubtitle:)` and `SunonoMenuItem`. A welcome card sits at the top of the thread, and a short thread starts under the header.
+- **History restores every card**, the same as live: checkout read-backs, the placed order with its "Order details" chip, the hand-off button, order ids, the reply language and voice notes. This needs a v1.2 server.
+- Bubbles: avatars beside each group of assistant messages, a date pill per day («اليوم» / "Today", «مبارح» / "Yesterday"), times, and ✓✓ once a message is delivered. A failed send is marked on the shopper's bubble. Long-press a bubble, or use the screen-reader action, to copy it. New API: `ChatMessage.delivered` and `controller.isSending(message)`.
+- `CheckoutHandoff` (`({String? url, String target})`), `ChatMessage.handoff`, `controller.checkout(url, target: 'cart' | 'checkout')` and `controller.addOpensProduct`.
+- `SunonoTheme.flat(primary:, dark:)` and new tokens, each derived unless you pass it: `chatBackground`, `headerBackground`, `botBubble`, `userBubble`, `onUserBubble`, `outline`, `online` and `chipOutline`. Read-only tokens: `controlOutline`, `datePill`, `onDatePill` and `isDark`. Also `fontFamilyFallback`, which `fromMaterial` takes from your text theme.
+- Composer: Shift+Enter inserts a new line on a hardware keyboard; Enter still sends.
+- Conformance fixtures for protocol v1.2: `turn_handoff_cart.json`, `turn_app_cart_unlinked.json`, `upload_audio.json` and `history_app.json`.
+
+### Fixed
+
+- Phone numbers, prices, quantities and order numbers keep their order inside Arabic text (bubbles, product and checkout cards, the cart bar).
+- Contrast: dark-mode success, danger and field borders; light success, danger and the date pill; the Add and hand-off buttons on light and very dark brand colors.
+- Every new control has a 48 dp target and a screen-reader label in the UI language, and the chat fits at 200% text on a 320 dp phone.
+
+### Notes
+
+- With a v1.1 server, the SDK still works, but checkout stays in chat as in 0.2, history restores text and cards only, and voice uploads fail with an error.
+
 ## 0.2.0
 
 Protocol v1.1 (additive). Breaking changes first.

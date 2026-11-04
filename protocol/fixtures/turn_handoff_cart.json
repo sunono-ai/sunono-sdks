@@ -1,0 +1,35 @@
+{
+  "description": "v1.2 app checkout (PROTOCOL §6): a place-order turn on an app token never collects, confirms or places. It hands checkout to the host cart page with checkout_handoff.target = \"cart\". A linked shopper also gets the site url, which an app client ignores for target cart.",
+  "unlinked": {
+    "response": {
+      "reply": "سلتك جاهزة 🛒 افتح السلة من التطبيق وكمّل الطلب من هناك.",
+      "session_id": "s1",
+      "msg_ref": "msg_hc1",
+      "action_data": {
+        "reply_lang": "ar",
+        "checkout_handoff": {"target": "cart"}
+      }
+    },
+    "expect": {"target": "cart", "url": null, "checkout": null}
+  },
+  "linked": {
+    "response": {
+      "reply": "Your cart is ready 🛒 Open your cart in the app to finish your order.",
+      "session_id": "s1",
+      "msg_ref": "msg_hc2",
+      "action_data": {
+        "reply_lang": "en",
+        "checkout_handoff": {"target": "cart", "url": "https://shop.example/checkout/"}
+      }
+    },
+    "expect": {"target": "cart", "url": "https://shop.example/checkout/", "checkout": null}
+  },
+  "site": {
+    "description": "No target (v1.1 servers, web parity): a site checkout, which needs an https url.",
+    "response": {
+      "reply": "تمام! كمّل الطلب من صفحة الدفع.",
+      "action_data": {"checkout_handoff": {"url": "https://shop.example/checkout/"}}
+    },
+    "expect": {"target": "checkout", "url": "https://shop.example/checkout/"}
+  }
+}
