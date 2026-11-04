@@ -116,7 +116,7 @@ void main() {
     });
   });
 
-  testWidgets('a staging-shaped app history restores its cards, the 5 products and Show more', (tester) async {
+  testWidgets('an app-style history restores its cards, the 5 products and Show more', (tester) async {
     final f = jsonDecode(File('../protocol/fixtures/history_app.json').readAsStringSync()) as Map<String, dynamic>;
     server.historyBody = f['response'];
     await tester.pumpWidget(app(SunonoChatView(controller: make('ar'))));

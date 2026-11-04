@@ -24,7 +24,7 @@ void main() {
         ),
         storage: MemoryStorage(),
         lang: lang,
-        cartBridge: _Bridge(), // linked on the first send: Add asks the bot (D2)
+        cartBridge: _Bridge(), // linked on the first send: Add asks the bot
         onIntent: (i) {
           intents.add(i);
           return true;

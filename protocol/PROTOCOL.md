@@ -409,7 +409,7 @@ The upload transcribes the note at once. It shares the photo rate limit, the kil
   | `403` | `customer_blocked`, `platform_disabled` | As for photos and turns | No |
   | `429` | *(none)* | Rate limited | Not automatically |
 
-- **Not idempotent.** Every upload is a new, paid transcription, and a `client_message_id` doesn't dedupe uploads. Re-upload automatically at most once, and only when the request got **no HTTP response**. A `401` (or `422` without an `error`) is re-auth and may be retried once after `/shops/init` (§2), since it was rejected before any work. Show every other HTTP error to the shopper and let them decide. Sending the same note again on `/chat/stream` with the same `client_message_id` is safe (§10). See `fixtures/upload_audio.json`.
+- **Not idempotent.** Every upload is a new, paid transcription, and a `client_message_id` doesn't dedupe uploads. Re-upload automatically at most once, and only after a connect/socket failure, when the request never reached the server. A **timeout** after the request was sent is not that: the transcription may already have run, so show the error and let the shopper retry (same `client_message_id`). A `401` (or `422` without an `error`) is re-auth and may be retried once after `/shops/init` (§2), since it was rejected before any work. Show every other HTTP error to the shopper and let them decide. Sending the same note again on `/chat/stream` with the same `client_message_id` is safe (§10). See `fixtures/upload_audio.json`.
 
 ## 10. Delivery semantics (mobile)
 

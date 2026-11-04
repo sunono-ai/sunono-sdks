@@ -44,6 +44,7 @@ Protocol v1.2 (additive). A flat chat design, history that restores every card, 
 - Phone numbers, prices, quantities and order numbers keep their order inside Arabic text (bubbles, product and checkout cards, the cart bar).
 - Contrast: dark-mode success, danger and field borders; light success, danger and the date pill; the Add and hand-off buttons on light and very dark brand colors.
 - Every new control has a 48 dp target and a screen-reader label in the UI language, and the chat fits at 200% text on a 320 dp phone.
+- A site checkout url that is not https no longer shows the hand-off button.
 
 ### Notes
 

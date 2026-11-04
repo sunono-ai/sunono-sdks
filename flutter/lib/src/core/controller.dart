@@ -389,7 +389,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// A turn is in flight; the composer should not send.
   bool get busy => _busy;
 
-  /// Card Add opens the product page instead of asking the bot (D2): the bot
+  /// Card Add opens the product page instead of asking the bot: the bot
   /// adds only to a linked storefront cart, and none is linked or linkable.
   bool get addOpensProduct => !_bound && (cartBridge == null || _bindFailed);
 
@@ -1035,6 +1035,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// Stop recording and send the note: under 1 s it is discarded, over the
   /// caps it never uploads; else a voice bubble appears and the turn runs
   /// (upload = transcription, then `/chat/stream` with the `audio_ref`).
+  /// How long the host recorder may take to hand back the note.
+  @visibleForTesting
+  static Duration recorderStopTimeout = const Duration(seconds: 10);
+
   Future<void> stopVoice() async {
     if (_voice.value is! VoiceRecording || _voiceStarting) return;
     final rec = voiceRecorder!, epoch = _epoch;
@@ -1043,7 +1047,12 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     _voice.value = const VoiceUploading(0);
     SunonoAudio? audio;
     try {
-      audio = await rec.stop();
+      audio = await rec.stop().timeout(recorderStopTimeout);
+    } on TimeoutException {
+      // A hung recorder must not leave the mic stuck on "uploading".
+      unawaited(rec.cancel().then<void>((_) {}, onError: (_) {}));
+      if (!_disposed && gen == _voiceGen && epoch == _epoch) _voice.value = const VoiceFailed('voice_failed');
+      return;
     } catch (e, s) {
       _emit(ErrorEvent(e, s));
     }
@@ -1201,9 +1210,10 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Upload (= transcribe) the note unless a fresh ref is in hand, then
-  /// stream the turn. Uploads are paid and not idempotent: only a failure with
-  /// no HTTP response is retried by itself (once); any refusal, including a
-  /// stream's 400 for an expired ref, waits for the shopper's Retry.
+  /// stream the turn. Uploads are paid and not idempotent: only a connect/socket failure
+  /// (nothing was sent) is retried by itself (once); any refusal, including a
+  /// stream's 400 for an expired ref, waits for the shopper's Retry. A timeout
+  /// is not "no response": the server may already have transcribed the note.
   Future<TurnResult> _voiceTurn(_Outgoing out, ChatMessage bot, int gen) async {
     final at = out.audioReadyAt, epoch = _epoch;
     if (out.audioRef == null || at == null || _clock().difference(at) > _imageRefMaxAge) {
@@ -1261,6 +1271,8 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
       rethrow; // the shopper changed (reset): nothing to show
     } catch (e, s) {
       if (current()) _emit(ErrorEvent(e, s));
+      // Timed out after the send began: the paid upload may have run. Shopper's Retry decides.
+      if (e is TimeoutException) throw const _VoiceRefused('offline');
       throw _NoResponse(e);
     } finally {
       if (identical(_abortVoice, abort)) _abortVoice = null;
@@ -1644,7 +1656,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Whether the host handled it (the sheet may close).
-  /// [target] `cart` (D1, app checkout): the host cart page, else (declined)
+  /// [target] `cart` (app checkout): the host cart page, else (declined)
   /// its native checkout screen when [nativeCheckout]; never the site [url].
   bool checkout(String? url, {String target = 'checkout'}) {
     _emit(const AnalyticsEvent('assistant_checkout_tapped'));

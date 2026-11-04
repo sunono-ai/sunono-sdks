@@ -82,11 +82,13 @@ class _Flaky extends http.BaseClient {
   _Flaky(this.inner, this.fails);
   final http.Client inner;
   final List<int> fails;
+  static bool timeout = false;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
     if (request.url.path.endsWith('/chat/upload') && fails[0] > 0) {
       fails[0]--;
+      if (timeout) throw TimeoutException('upload timed out');
       throw http.ClientException('Network is unreachable');
     }
     return inner.send(request);
@@ -118,6 +120,7 @@ void main() {
 
   setUp(() {
     uploadFails[0] = 0;
+    _Flaky.timeout = false;
     now = DateTime(2026, 11, 4, 12);
     server = FakeServer();
     rec = FakeRecorder();
@@ -318,6 +321,34 @@ void main() {
       expect(failed.retryable, isTrue);
       await c.retry(failed);
       expect(server.count('/chat/stream'), 2);
+    });
+
+    test('an upload TIMEOUT is not re-uploaded by itself: error shown, Retry is the shopper\'s', () async {
+      await c.open();
+      _Flaky.timeout = true;
+      uploadFails[0] = 1;
+      await record();
+      await c.stopVoice();
+      expect(server.count('/chat/upload'), 0, reason: 'the flaky client threw once; no second attempt');
+      expect(uploadFails[0], 0);
+      final failed = c.messages.last;
+      expect(failed.errorCode, 'offline');
+      expect(failed.retryable, isTrue);
+      expect(server.count('/chat/stream'), 0);
+    });
+
+    test('a hung recorder.stop() times out into voice_failed and frees the mic', () async {
+      await c.open();
+      SunonoChatController.recorderStopTimeout = const Duration(milliseconds: 50);
+      addTearDown(() => SunonoChatController.recorderStopTimeout = const Duration(seconds: 10));
+      await record();
+      rec.stopGate = Completer<void>();
+      await c.stopVoice();
+      expect(c.voice.value, isA<VoiceFailed>());
+      expect((c.voice.value as VoiceFailed).code, 'voice_failed');
+      expect(rec.cancels, greaterThan(0));
+      expect(c.canRecord, isTrue);
+      rec.stopGate!.complete();
     });
 
     test('a stream 400 (expired audio_ref) waits for Retry, which re-uploads with the same client_message_id',
@@ -685,6 +716,22 @@ void main() {
       expect(rec.stops, 0);
       expect(server.count('/chat/upload'), 0);
       c.suspend();
+    });
+
+    testWidgets('Send while the mic is starting keeps the typed text', (tester) async {
+      await pumpView(tester);
+      await tester.enterText(find.byType(TextField), 'hello');
+      await tester.pump();
+      rec.gate = Completer<bool>();
+      unawaited(c.startVoice()); // the permission prompt is open
+      await tester.pump();
+      await tester.tap(find.byTooltip('إرسال'));
+      await tester.pump();
+      expect(server.count('/chat/stream'), 0);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'hello');
+      rec.gate!.complete(false);
+      await settle(tester);
+      await done(tester);
     });
 
     testWidgets('a route pushed over the chat mid-recording cancels the mic', (tester) async {

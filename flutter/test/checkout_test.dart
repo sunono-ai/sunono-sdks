@@ -390,7 +390,7 @@ void main() {
     });
   });
 
-  group('handoff target cart (D1)', () {
+  group('handoff target cart', () {
     const cart = {
       'checkout_handoff': {'target': 'cart'},
     };
@@ -487,7 +487,7 @@ void main() {
     });
   });
 
-  group('card Add without a linked cart (D2)', () {
+  group('card Add without a linked cart', () {
     const cards = {
       'products': [
         {'public_id': 'p1', 'sku': 'S1', 'title_en': 'Coffee', 'price_jod': 8},

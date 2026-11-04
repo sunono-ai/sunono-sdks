@@ -16,7 +16,7 @@ import 'golden_harness.dart';
 ///   more, the quick replies under the reply and the cart bar.
 /// - `checkout_*`: a confirm read-back with a phone (LTR in Arabic), then the
 ///   placed card with Order details and the handoff button.
-/// - `handoff_cart_*` (light): app checkout (D1), «افتح السلة» / "Open cart".
+/// - `handoff_cart_*` (light): app checkout, «افتح السلة» / "Open cart".
 void main() {
   setUpAll(loadGoldenFonts);
 

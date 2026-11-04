@@ -34,7 +34,7 @@
        "action": {}},
       {"role": "user", "sender": "user", "text": "بدي قهوة", "products": [], "msg_ref": "u2", "image": null,
        "ts": "2026-11-03T10:05:00+00:00", "has_more": false, "checkout_handoff": null,
-       "audio": {"url": "/api/media/v.m4a", "duration_ms": 3200}},
+       "audio": {"url": "/api/media/v.mp3", "duration_ms": 3200}},
       {"role": "bot", "sender": "bot", "text": "لقيتلك هدول:", "msg_ref": "b6", "image": null,
        "ts": "2026-11-03T10:05:05+00:00", "has_more": true, "checkout_handoff": null,
        "products": [
@@ -63,7 +63,7 @@
     "row4_handoff_target": "cart",
     "row4_handoff_url": null,
     "row5_image": "https://api.test/api/media/s.jpg",
-    "row6_audio_url": "https://api.test/api/media/v.m4a",
+    "row6_audio_url": "https://api.test/api/media/v.mp3",
     "row6_audio_duration_ms": 3200,
     "row7_products": 5,
     "row7_has_more": true

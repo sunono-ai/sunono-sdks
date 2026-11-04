@@ -99,7 +99,7 @@ void main() {
     expect(bridge.ensures, 1);
   });
 
-  group('Add without a linked cart (D2)', () {
+  group('Add without a linked cart', () {
     test('a bridge not yet tried: Add asks the bot (the send ensures first)', () async {
       await c.open();
       expect(c.addOpensProduct, isFalse);

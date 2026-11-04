@@ -164,7 +164,8 @@ class _SunonoChatViewState extends State<SunonoChatView> {
 
   void _send() {
     final text = _input.text.trim();
-    if (_c.busy || _c.status != ChatStatus.ready) return;
+    // Where the controller would refuse the send, keep the typed text.
+    if (_c.busy || _c.status != ChatStatus.ready || _c.recording || _c.updateRequired) return;
     final photo = _c.photo.value;
     // Uploading, or failed in a way a retry can fix: wait (the error is under the preview).
     if (photo is PhotoUploading || (photo is PhotoFailed && photo.retryable)) return;
@@ -742,7 +743,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
               if (!c.openProduct(p)) _cardTap(p, 'product_detail', detailsPhrase, contentLang);
             },
             onAdd: (p) {
-              // No linked cart (D2): the bot can't add, the product page can.
+              // No linked cart: the bot can't add, the product page can.
               if (!c.addOpensProduct) {
                 _cardTap(p, 'add_to_cart', addToCartPhrase, contentLang);
               } else if (!c.openProduct(p)) {
@@ -777,7 +778,7 @@ class _MessageItemState extends State<_MessageItem> with SingleTickerProviderSta
       }
       final h = m.handoff;
       if (h != null) {
-        // Target cart (app checkout, D1) wins over any site url.
+        // Target cart (app checkout) wins over any site url.
         children.add(Padding(
           padding: const EdgeInsets.only(top: 10),
           child: HandoffButton(

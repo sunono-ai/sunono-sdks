@@ -130,7 +130,7 @@ ValueListenableBuilder<int>(
 );
 ```
 
-`unread` counts assistant and staff messages that arrive while no chat view is on screen (a hidden tab or a covered route counts as off screen) and clears when one shows. The live connection keeps running while the app is in the foreground, even with the chat hidden, and stops in the background. If you drive `SunonoChatController` headless (your own UI, `open()` without `attach()`), call `suspend()` / `resume()` from your app lifecycle yourself.
+`unread` counts assistant and staff messages that arrive while no chat view is on screen (a hidden tab or a covered route counts as off screen) and clears when one shows. The live connection keeps running while the app is in the foreground, even with the chat hidden, and stops in the background. If you drive `SunonoChatController` headless (your own UI, `open()` without `attach()`), call `suspend()` / `resume()` from your app lifecycle yourself, and call `cancelVoice()` when the shopper leaves your own chat screen (otherwise a recording keeps the mic open).
 
 ## Storage
 
@@ -298,7 +298,7 @@ This data is processed by Sunono and its subprocessors: AI model providers, mess
 **Deletion.** `Sunono.reset()` unlinks this device from the shopper's data (logout); it does **not** delete it. A shopper who wants their data deleted asks the shop or Sunono support (support@sunono.ai).
 
 - **App Store guideline 5.1.2(i).** The shopper's messages are sent to third-party AI services. Disclose this in your privacy policy and tell the shopper before first use (e.g. a line above the chat entry point), and get consent where your policy or law requires it.
-- **Jordan's Personal Data Protection Law (PDPL).** Name, phone and address are personal data. Collect them only for checkout, state the purposes in your privacy policy, and route access and deletion requests to the shop or Sunono support.
+- **Jordan's Personal Data Protection Law (PDPL).** Name, phone and address are personal data. They are collected for order tracking and support (checkout itself happens in your app's cart page), so collect nothing beyond that; state the purposes in your privacy policy, and route access and deletion requests to the shop or Sunono support.
 
 ## Notes
 

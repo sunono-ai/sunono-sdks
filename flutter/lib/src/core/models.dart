@@ -498,7 +498,7 @@ class TurnResult {
   final bool relink;
 
   /// The bot refused an add: this app shopper has no linked storefront cart
-  /// (`status: app_cart_unlinked`, D2). Card Add opens the product until a link.
+  /// (`status: app_cart_unlinked`). Card Add opens the product until a link.
   final bool cartUnlinked;
   final OrderIds? orderIds;
 
