@@ -91,6 +91,14 @@ Widget boundedNetworkImage(BuildContext context, String url,
 /// Prices, percentages and SKUs read left to right inside Arabic text.
 Widget _ltr(Widget child) => Directionality(textDirection: TextDirection.ltr, child: child);
 
+/// A filled button's color and its text: [SunonoTheme.primary], moved only as
+/// far as it must be to stand out from [on] (3:1), so a white or black brand
+/// still shows a button.
+(Color, Color) _filled(SunonoTheme theme, Color on) {
+  final fill = readableOn(theme.primary, [on], min: 3);
+  return (fill, fill == theme.primary ? theme.onPrimary : onColor(fill));
+}
+
 class ProductTile extends StatelessWidget {
   const ProductTile({
     super.key,
@@ -146,7 +154,7 @@ class ProductTile extends StatelessWidget {
         width: 164,
         decoration: BoxDecoration(
           color: theme.surface,
-          borderRadius: BorderRadius.circular(theme.radius - 4),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: theme.outline),
         ),
         clipBehavior: Clip.antiAlias,
@@ -256,8 +264,8 @@ class ProductTile extends StatelessWidget {
       );
 
   Widget _noImage() => DecoratedBox(
-        decoration: BoxDecoration(color: Color.alphaBlend(theme.primary.withValues(alpha: 0.08), theme.surface)),
-        child: Icon(Icons.shopping_bag_outlined, color: theme.primary.withValues(alpha: 0.5)),
+        decoration: BoxDecoration(color: Color.alphaBlend(theme.primary.withValues(alpha: 0.06), theme.surface)),
+        child: Icon(Icons.shopping_bag_outlined, color: theme.primaryText.withValues(alpha: 0.6)),
       );
 
   /// Stock status sits top-start; the sale badge sits top-end.
@@ -308,10 +316,12 @@ class _AddButton extends StatelessWidget {
   final VoidCallback? onTap;
   final bool spinning;
 
-  /// 32 dp to see, 48 dp to touch: the 8 dp above and below are the gap to
+  /// 40 dp to see, 48 dp to touch: the 4 dp above and below are the gap to
   /// the price and the card's bottom padding.
   @override
-  Widget build(BuildContext context) => Semantics(
+  Widget build(BuildContext context) {
+    final (fill, text) = _filled(theme, theme.surface);
+    return Semantics(
       container: true,
       button: true,
       enabled: onTap != null,
@@ -322,33 +332,33 @@ class _AddButton extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: Opacity(
             opacity: onTap == null ? 0.5 : 1,
             child: Material(
               color: Colors.transparent,
               child: Ink(
-                height: 32,
-                decoration: BoxDecoration(color: theme.primary, borderRadius: BorderRadius.circular(16)),
+                height: 40,
+                decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(20)),
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(20),
                   onTap: onTap,
                   child: Center(
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       if (spinning)
                         // Reduce motion: a still glyph instead of a spinner.
                         MediaQuery.disableAnimationsOf(context)
-                            ? Icon(Icons.hourglass_top_rounded, size: 15, color: theme.onPrimary)
+                            ? Icon(Icons.hourglass_top_rounded, size: 16, color: text)
                             : SizedBox.square(
-                                dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: theme.onPrimary))
+                                dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: text))
                       else
-                        Icon(Icons.add_shopping_cart_rounded, size: 15, color: theme.onPrimary),
+                        Icon(Icons.add_shopping_cart_rounded, size: 16, color: text),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.text(size: 12, weight: FontWeight.w600, color: theme.onPrimary)),
+                            style: theme.text(size: 13, weight: FontWeight.w600, color: text)),
                       ),
                     ]),
                   ),
@@ -357,10 +367,13 @@ class _AddButton extends StatelessWidget {
             ),
           ),
         ),
-      ));
+      ),
+    );
+  }
 }
 
-/// A rounded outline chip (show more, retry, starter prompts).
+/// An outlined chip on the chat page (quick replies, show more, retry, order
+/// details): 48 dp tall, a leading icon, one line of text.
 class SunonoChip extends StatelessWidget {
   const SunonoChip({super.key, required this.theme, required this.label, required this.onTap, this.icon});
   final SunonoTheme theme;
@@ -368,20 +381,33 @@ class SunonoChip extends StatelessWidget {
   final VoidCallback? onTap;
   final IconData? icon;
 
+  static const _shape = RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(24)));
+
   @override
-  Widget build(BuildContext context) => Material(
-        color: theme.surface,
-        shape: StadiumBorder(side: BorderSide(color: theme.chipOutline)),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (icon != null) ...[Icon(icon, size: 16, color: theme.primaryText), const SizedBox(width: 6)],
-              Flexible(
-                  child: Text(label, style: theme.text(size: 13, weight: FontWeight.w600, color: theme.primaryText))),
-            ]),
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        enabled: onTap != null,
+        child: Material(
+          color: Colors.transparent,
+          shape: _shape.copyWith(side: BorderSide(color: theme.chipOutline, width: 1.5)),
+          child: InkWell(
+            customBorder: _shape,
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(start: 12, end: 14),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (icon != null) ...[Icon(icon, size: 20, color: theme.primaryText), const SizedBox(width: 6)],
+                  Flexible(
+                    child: Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.text(size: 15, weight: FontWeight.w600, color: theme.primaryText)),
+                  ),
+                ]),
+              ),
+            ),
           ),
         ),
       );
@@ -394,22 +420,29 @@ class HandoffButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
+  /// On the chat page, so the user-bubble fill (stands out on any brand).
+  /// The arrow follows the reading direction.
   @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.transparent,
-        child: Ink(
-          decoration: BoxDecoration(color: theme.primary, borderRadius: BorderRadius.circular(24)),
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        child: Material(
+          color: theme.userBubble,
+          borderRadius: BorderRadius.circular(24),
           child: InkWell(
             borderRadius: BorderRadius.circular(24),
             onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(
-                    child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700, color: theme.onPrimary))),
-                const SizedBox(width: 8),
-                Icon(Icons.arrow_forward_rounded, size: 18, color: theme.onPrimary),
-              ]),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Flexible(
+                      child:
+                          Text(label, style: theme.text(size: 15, weight: FontWeight.w700, color: theme.onUserBubble))),
+                  const SizedBox(width: 8),
+                  Icon(Icons.arrow_forward_rounded, size: 18, color: theme.onUserBubble),
+                ]),
+              ),
             ),
           ),
         ),
@@ -458,33 +491,39 @@ class CartBar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: theme.primary.withValues(alpha: 0.15)),
+                border: Border.all(color: theme.outline),
               ),
-              child: Row(children: [
-                thumb,
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.text(size: 13, weight: FontWeight.w700)),
-                ),
-                if (more > 0) ...[
-                  const SizedBox(width: 8),
-                  _ltr(Text('+$more', style: theme.text(size: 12, weight: FontWeight.w700, color: theme.muted))),
-                ],
-                if (cart.totalFils != null) ...[
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(formatFils(cart.totalFils, lang),
-                        textAlign: TextAlign.end,
-                        style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primaryText)),
-                  ),
-                ],
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right_rounded,
-                    size: 18, color: theme.muted, textDirection: Directionality.of(context)),
-              ]),
+              child: LayoutBuilder(
+                  builder: (context, box) => Row(children: [
+                        thumb,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.text(size: 13, weight: FontWeight.w700)),
+                        ),
+                        if (more > 0) ...[
+                          const SizedBox(width: 8),
+                          _ltr(
+                              Text('+$more', style: theme.text(size: 12, weight: FontWeight.w700, color: theme.muted))),
+                        ],
+                        // Its own width (at most 40%): the name gives way, the total
+                        // stays pinned to the end instead of floating mid-bar.
+                        if (cart.totalFils != null) ...[
+                          const SizedBox(width: 8),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: box.maxWidth * 0.4),
+                            child: Text(formatFils(cart.totalFils, lang),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primaryText)),
+                          ),
+                        ],
+                        const SizedBox(width: 4),
+                        Icon(Icons.chevron_right_rounded,
+                            size: 18, color: theme.muted, textDirection: Directionality.of(context)),
+                      ])),
             ),
           ),
         ),
@@ -562,8 +601,8 @@ class CheckoutCardView extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.surface,
-        borderRadius: BorderRadius.circular(theme.radius - 4),
-        border: Border.all(color: (placed ? theme.success : theme.primary).withValues(alpha: 0.25)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: placed ? theme.success.withValues(alpha: 0.4) : theme.outline),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
@@ -584,12 +623,25 @@ class CheckoutCardView extends StatelessWidget {
     );
   }
 
+  /// A value in its own direction: a phone, order number, email or Latin
+  /// address stays left to right in an Arabic card (`+962…`, not `…962+`).
+  /// [end] aligns it to the card's end side (else its start side).
+  Widget _value(String value, TextStyle style, {bool end = true}) {
+    if (isRtlText(value, fallbackRtl: false)) {
+      return Text(value, textAlign: end ? TextAlign.end : TextAlign.start, style: style);
+    }
+    return Builder(builder: (context) {
+      final rtlCard = Directionality.of(context) == TextDirection.rtl;
+      return _ltr(Text(value, textAlign: rtlCard == end ? TextAlign.left : TextAlign.right, style: style));
+    });
+  }
+
   Widget _known(String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(Icons.check_rounded, size: 15, color: theme.success),
           const SizedBox(width: 6),
-          Expanded(child: Text(value, style: theme.text(size: 13, weight: FontWeight.w600))),
+          Expanded(child: _value(value, theme.text(size: 13, weight: FontWeight.w600), end: false)),
         ]),
       );
 
@@ -603,31 +655,27 @@ class CheckoutCardView extends StatelessWidget {
             ],
             Expanded(child: Text(label, style: theme.text(size: 13, color: theme.muted))),
             const SizedBox(width: 12),
-            Flexible(
-              child: Text(value,
-                  textAlign: TextAlign.end,
-                  style: theme.text(
+            Expanded(
+              child: _value(
+                  value,
+                  theme.text(
                       size: 13,
                       weight: FontWeight.w600,
                       color: pending ? theme.muted : (accent ? theme.success : theme.onSurface))),
             ),
           ]),
-          if (note != null) Text(note, style: theme.text(size: 11, color: theme.accent)),
+          if (note != null) Text(note, style: theme.text(size: 12, color: theme.accentText)),
         ]),
       );
 
   Widget _total(String label, String value) => Container(
         margin: const EdgeInsets.only(top: 6),
         padding: const EdgeInsets.only(top: 8),
-        decoration: BoxDecoration(border: Border(top: BorderSide(color: theme.primary.withValues(alpha: 0.12)))),
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: theme.outline))),
         child: Row(children: [
           Expanded(child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700))),
           const SizedBox(width: 8),
-          Flexible(
-            child: Text(value,
-                textAlign: TextAlign.end,
-                style: theme.text(size: 15, weight: FontWeight.w800, color: theme.primaryText)),
-          ),
+          Expanded(child: _value(value, theme.text(size: 15, weight: FontWeight.w800, color: theme.primaryText))),
         ]),
       );
 

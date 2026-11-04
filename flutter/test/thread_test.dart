@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -26,7 +27,9 @@ void main() {
   late List<SunonoEvent> events;
 
   SunonoChatController make(String lang,
-          {Map<String, List<String>>? starters, bool Function(SunonoIntent)? onIntent}) =>
+          {Map<String, List<String>>? starters,
+          Map<String, List<SunonoQuickReply>>? quick,
+          bool Function(SunonoIntent)? onIntent}) =>
       c = SunonoChatController(
         api: SunonoApi(
           shopKey: 'pk_test',
@@ -37,6 +40,7 @@ void main() {
         storage: MemoryStorage(),
         lang: lang,
         starterPrompts: starters,
+        quickReplies: quick,
         onIntent: onIntent,
         recoveryChecks: const [Duration(milliseconds: 5)],
       )..events.listen(events.add);
@@ -403,29 +407,76 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('starter prompts: shown on an empty thread, sent synthetic, gone after', (tester) async {
+    testWidgets('default quick replies on an empty thread; "Talk to our team" sends the escalate phrase',
+        (tester) async {
       await tester.pumpWidget(app(SunonoChatView(controller: make('ar'))));
       await settle(tester);
-      expect(find.text('شو في جديد عندكم؟'), findsOneWidget);
-      expect(find.text('بدي أتابع طلبي'), findsOneWidget);
-      expect(find.text('في عروض هلأ؟'), findsOneWidget);
-      await tester.tap(find.text('بدي أتابع طلبي'));
+      expect(find.text('شو العروض؟'), findsOneWidget);
+      expect(find.byIcon(Icons.local_offer_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.headset_mic_outlined), findsOneWidget);
+      await tester.tap(find.text('احكي مع الفريق'));
       await settle(tester);
       final body = jsonDecode(server.bodies['/chat']!.last) as Map<String, dynamic>;
-      expect(body['message'], 'بدي أتابع طلبي');
+      expect(body['message'], 'بدي أحكي مع حدا من الفريق');
       expect(body['synthetic'], true);
-      expect(find.text('في عروض هلأ؟'), findsNothing);
       await finish(tester);
     });
 
-    testWidgets('English starters, and the host can override per language', (tester) async {
+    testWidgets('quick replies sit under the latest bot reply only; English copy', (tester) async {
+      server.historyRows = [
+        row('bot', 'first', ref: 'b1'),
+        row('user', 'q', ref: 'u1'),
+        row('bot', 'second', ref: 'b2'),
+      ];
       await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
       await settle(tester);
-      for (final s in ["What's new?", 'Track my order', 'Any offers?']) {
-        expect(find.text(s), findsOneWidget);
-      }
+      expect(find.text('Browse offers'), findsOneWidget);
+      expect(find.text('Talk to our team'), findsOneWidget);
+      final chip = tester.getTopLeft(find.text('Browse offers')).dy;
+      expect(chip, greaterThan(tester.getBottomLeft(find.text('second')).dy), reason: 'under the last reply');
+      await tester.tap(find.text('Browse offers'));
+      await settle(tester);
+      final body = jsonDecode(server.bodies['/chat']!.last) as Map<String, dynamic>;
+      expect(body['message'], 'What offers do you have?');
+      expect(body['synthetic'], true);
       await finish(tester);
 
+      // The shopper spoke last: no chips.
+      server.historyRows = [row('bot', 'first', ref: 'b1'), row('user', 'q', ref: 'u1')];
+      await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+      await settle(tester);
+      expect(find.text('Browse offers'), findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('quick replies hide while a turn runs and while paused', (tester) async {
+      final hold = Completer<void>();
+      server.beforeChatReply = () => hold.future;
+      await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+      await settle(tester);
+      await tester.tap(find.text('Browse offers'));
+      await settle(tester);
+      expect(c.busy, isTrue);
+      expect(find.text('Browse offers'), findsNothing);
+      hold.complete();
+      await settle(tester);
+      expect(find.text('Browse offers'), findsOneWidget, reason: 'back under the reply');
+      await finish(tester);
+
+      server.historyBody = {
+        'messages': [row('bot', 'hi', ref: 'b1', ts: '2026-10-30T22:00:00+00:00')],
+        'bot_paused_at': '2026-10-30T22:05:00+00:00',
+        'cart': null,
+      };
+      await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+      await settle(tester);
+      expect(c.paused, isTrue);
+      expect(find.text('Browse offers'), findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('starterPrompts still work as text-only quick replies; quickReplies wins and can run an action',
+        (tester) async {
       await tester.pumpWidget(app(SunonoChatView(
           controller: make('en', starters: {
         'en': ['Gift ideas'],
@@ -433,7 +484,45 @@ void main() {
       }))));
       await settle(tester);
       expect(find.text('Gift ideas'), findsOneWidget);
-      expect(find.text('Track my order'), findsNothing);
+      expect(find.text('Browse offers'), findsNothing);
+      await tester.tap(find.text('Gift ideas'));
+      await settle(tester);
+      expect((jsonDecode(server.bodies['/chat']!.last) as Map)['message'], 'Gift ideas');
+      expect(find.widgetWithText(InkWell, 'Gift ideas'), findsOneWidget, reason: 'under the reply too');
+      await finish(tester);
+
+      var opened = 0;
+      await tester.pumpWidget(app(SunonoChatView(
+          controller: make('en', starters: {
+        'en': ['Gift ideas']
+      }, quick: {
+        'en': [SunonoQuickReply('Offers page', Icons.local_offer_outlined, 'unused', action: () => opened++)],
+        'ar': const [],
+      }))));
+      await settle(tester);
+      expect(find.text('Gift ideas'), findsNothing);
+      final sends = server.bodies['/chat']!.length;
+      await tester.tap(find.text('Offers page'));
+      await settle(tester);
+      expect(opened, 1);
+      expect(server.bodies['/chat'], hasLength(sends), reason: 'the action runs instead of a send');
+      c.lang = 'ar';
+      await settle(tester);
+      expect(find.text('احكي مع الفريق'), findsNothing, reason: '[] shows none');
+      await finish(tester);
+    });
+
+    testWidgets('chips are 48 dp tall with a button node', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(app(SunonoChatView(controller: make('en'))));
+      await settle(tester);
+      for (final label in ['Browse offers', 'Talk to our team']) {
+        final chip = find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+        expect(tester.getSize(chip).height, greaterThanOrEqualTo(48));
+        // ignore: deprecated_member_use
+        expect(tester.getSemantics(find.text(label)), containsSemantics(isButton: true, hasTapAction: true));
+      }
+      semantics.dispose();
       await finish(tester);
     });
 
@@ -574,16 +663,16 @@ void main() {
       await finish(tester);
     }, skip: false);
 
-    testWidgets('320 px at 200% text with timestamps, starters and welcome lays out', (tester) async {
+    testWidgets('320 px at 200% text with timestamps, quick replies and welcome lays out', (tester) async {
       tester.view.physicalSize = const Size(320 * 3, 640 * 3);
       tester.view.devicePixelRatio = 3;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(app(SunonoChatView(controller: make('ar')), textScale: 2));
       await settle(tester);
       expect(tester.takeException(), isNull);
-      // An empty thread starts at the top (welcome card): the starters are below it.
-      await tester.dragUntilVisible(find.text('شو في جديد عندكم؟'), find.byType(ListView), const Offset(0, -200));
-      expect(find.text('شو في جديد عندكم؟'), findsOneWidget);
+      // An empty thread starts at the top (welcome card): the quick replies are below it.
+      await tester.dragUntilVisible(find.text('احكي مع الفريق'), find.byType(ListView), const Offset(0, -200));
+      expect(find.text('احكي مع الفريق'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await finish(tester);
     });

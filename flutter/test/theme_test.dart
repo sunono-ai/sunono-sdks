@@ -122,7 +122,7 @@ void main() {
     });
   });
 
-  test('no gradients in lib/src/ui outside the deprecated orb', () {
+  test('no gradients or shadows in lib/src/ui outside the deprecated orb', () {
     final hits = <String>[];
     for (final f in Directory('lib/src/ui').listSync(recursive: true).whereType<File>()) {
       if (!f.path.endsWith('.dart') || f.path.endsWith('orb.dart')) continue;
@@ -131,7 +131,8 @@ void main() {
         final l = lines[i];
         // theme.dart keeps the deprecated brandGradient getter (public API until 1.0).
         if (f.path.endsWith('theme.dart') && l.contains('LinearGradient get brandGradient')) continue;
-        if (RegExp(r'gradient:|RadialGradient|LinearGradient|SweepGradient|brandGradient|\.glow\b').hasMatch(l)) {
+        if (RegExp(r'gradient:|RadialGradient|LinearGradient|SweepGradient|brandGradient|\.glow\b|boxShadow:')
+            .hasMatch(l)) {
           hits.add('${f.path}:${i + 1}: ${l.trim()}');
         }
       }

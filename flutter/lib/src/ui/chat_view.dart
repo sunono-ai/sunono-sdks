@@ -193,7 +193,30 @@ class _SunonoChatViewState extends State<SunonoChatView> {
               textAlign: TextAlign.center, style: theme.text(color: theme.muted)));
     } else {
       final msgs = _c.messages;
-      final starters = msgs.isEmpty && _c.status == ChatStatus.ready ? (_c.starterPrompts?[lang] ?? t.starters) : null;
+      // Quick replies: on an empty thread, else under the latest reply; only
+      // while the assistant can take a turn (idle, not paused).
+      final idle = !_c.busy && !_c.paused && _c.status == ChatStatus.ready;
+      final last = msgs.lastOrNull;
+      final replies = !idle
+          ? const <SunonoQuickReply>[]
+          : (_c.quickReplies?[lang] ??
+              _c.starterPrompts?[lang]?.map((p) => SunonoQuickReply(p, null, p)).toList() ??
+              t.quickReplies);
+      final quick = replies.isEmpty
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final q in replies)
+                  SunonoChip(
+                      theme: theme,
+                      label: q.label,
+                      icon: q.icon,
+                      onTap: q.action ?? () => _c.send(q.message, synthetic: true)),
+              ]),
+            );
+      final quickOnLast =
+          last != null && (last.role == ChatRole.bot || last.role == ChatRole.staff) && last.state == MessageState.done;
       // The welcome is a permanent first bot bubble, not a message from the server.
       final welcome = ChatMessage(id: 'welcome', role: ChatRole.bot, text: _c.config.welcome(lang) ?? t.welcome);
       final now = DateTime.now();
@@ -240,16 +263,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                     timed: false,
                     dayLabel: msgs.isEmpty ? null : dayAbove(0),
                     avatar: msgs.isEmpty || !botish(msgs.first),
-                    footer: starters == null || starters.isEmpty
-                        ? null
-                        : Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Wrap(spacing: 8, runSpacing: 8, children: [
-                              for (final p in starters)
-                                SunonoChip(
-                                    theme: theme, label: p, onTap: _c.busy ? null : () => _c.send(p, synthetic: true)),
-                            ]),
-                          ),
+                    footer: msgs.isEmpty ? quick : null,
                   );
                 }
                 return _MessageItem(
@@ -263,6 +277,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                   dayLabel: index == 0 ? null : dayAbove(index),
                   // The avatar marks the last bubble of a run of bot/staff messages.
                   avatar: index == msgs.length - 1 || !botish(msgs[index + 1]),
+                  footer: index == msgs.length - 1 && quickOnLast ? quick : null,
                   onClose: widget.onClose,
                 );
               },
@@ -381,7 +396,7 @@ class _MessageItem extends StatefulWidget {
   /// (the others keep the same space so their bubbles line up).
   final bool avatar;
 
-  /// Extra content under the bubble (the starter chips).
+  /// Extra content under the reply (the quick replies).
   final Widget? footer;
 
   /// Closes the sheet after the host takes over checkout.

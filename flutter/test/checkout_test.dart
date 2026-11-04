@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
+import 'package:sunono/src/ui/theme.dart' show contrastRatio;
 import 'package:sunono/sunono.dart';
 
 import 'fake_server.dart';
@@ -164,6 +165,66 @@ void main() {
     });
   });
 
+  group('values (F7) and notes (F10)', () {
+    const confirm = {
+      'order_confirm': true,
+      'details': [
+        {'key': 'name', 'label_ar': 'الاسم', 'value': 'سارة'},
+        {'key': 'phone', 'label_ar': 'الهاتف', 'value': '+962790000000'},
+        {'key': 'email', 'label_ar': 'الإيميل', 'value': 'sara@shop.example'},
+      ],
+      'order_total_text': '12.500 د.أ',
+    };
+
+    TextDirection dirOf(WidgetTester tester, String text) => tester
+        .widget<Directionality>(find.ancestor(of: find.text(text), matching: find.byType(Directionality)).first)
+        .textDirection;
+
+    testWidgets('a phone and an email read left to right inside an Arabic card, at its end side', (tester) async {
+      await turn(tester, 'ar', confirm);
+      expect(dirOf(tester, '+962790000000'), TextDirection.ltr);
+      expect(dirOf(tester, 'sara@shop.example'), TextDirection.ltr);
+      expect(dirOf(tester, 'سارة'), TextDirection.rtl, reason: 'Arabic values keep the card direction');
+      // RTL: the label is on the right, the value on the left (the end side).
+      expect(tester.getCenter(find.text('+962790000000')).dx, lessThan(tester.getCenter(find.text('الهاتف')).dx));
+      await finish(tester);
+    });
+
+    testWidgets('a known phone in the collect card is LTR too', (tester) async {
+      await turn(tester, 'ar', {
+        'order_collect': true,
+        'known': {'phone': '+962790000000'},
+        'missing_fields': <Object>[],
+      });
+      expect(dirOf(tester, '+962790000000'), TextDirection.ltr);
+      await finish(tester);
+    });
+
+    testWidgets('field notes are contrast-checked on the card', (tester) async {
+      await turn(tester, 'ar', {
+        'order_amend': true,
+        'details': [
+          {'key': 'area', 'label_ar': 'المنطقة', 'value': 'عمّان'},
+        ],
+        'field_notes': [
+          {'key': 'area', 'note': 'NOTE-AREA'},
+        ],
+      });
+      final color = tester.widget<Text>(find.text('NOTE-AREA')).style!.color!;
+      expect(contrastRatio(color, Colors.white), greaterThanOrEqualTo(4.5));
+      await finish(tester);
+    });
+
+    testWidgets('200% text on 320px: a confirm card with a long phone and email lays out', (tester) async {
+      tester.view.physicalSize = const Size(320 * 3, 640 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      await turn(tester, 'ar', confirm, textScale: 2);
+      expect(tester.takeException(), isNull);
+      await finish(tester);
+    });
+  });
+
   group('handoff', () {
     const handoff = {
       'checkout_handoff': {'url': 'https://shop.example/checkout/'},
@@ -182,6 +243,15 @@ void main() {
         await finish(tester);
       });
     }
+
+    testWidgets('the button and the order details chip are 48 dp tall', (tester) async {
+      await turn(tester, 'en', {...handoff, ..._placed});
+      for (final label in ['Complete order on the site', 'Order details']) {
+        final box = find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+        expect(tester.getSize(box).height, greaterThanOrEqualTo(48), reason: label);
+      }
+      await finish(tester);
+    });
 
     testWidgets('handled tap: intent, then the sheet closes', (tester) async {
       await turn(tester, 'en', handoff, native: true);

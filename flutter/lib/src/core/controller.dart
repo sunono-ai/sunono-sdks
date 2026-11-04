@@ -146,6 +146,7 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
     this.nativeCheckout = false,
     this.onIntent,
     this.starterPrompts,
+    this.quickReplies,
     this.recoveryChecks = const [Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 18)],
     DateTime Function() clock = DateTime.now,
   })  : _api = api,
@@ -177,9 +178,14 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// Returns true when the host handled the intent.
   bool Function(SunonoIntent intent)? onIntent;
 
-  /// Host override of the empty-thread starter chips, by language (`ar` / `en`).
-  /// A language that is missing uses the SDK defaults; an empty list shows none.
+  /// Deprecated: use [quickReplies]. Text-only quick replies by language
+  /// (`ar` / `en`), used when [quickReplies] has none for that language.
   final Map<String, List<String>>? starterPrompts;
+
+  /// The chips under the latest reply and on an empty thread, by language
+  /// (`ar` / `en`). A missing language falls back to [starterPrompts], then
+  /// the SDK defaults ("Browse offers", "Talk to our team"); `[]` shows none.
+  final Map<String, List<SunonoQuickReply>>? quickReplies;
 
   /// Delays between history checks while recovering (cumulative waits).
   final List<Duration> recoveryChecks;

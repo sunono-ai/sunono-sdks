@@ -87,7 +87,7 @@ void main() {
     await settle(tester);
     await tester.tap(find.byTooltip('More options'));
     await tester.pumpAndSettle();
-    expect(find.text('Talk to our team'), findsOneWidget);
+    expect(_menu('Talk to our team'), findsOneWidget);
     expect(find.text('Help center'), findsOneWidget);
     await tester.tap(find.text('Help center'));
     await tester.pumpAndSettle();
@@ -95,7 +95,7 @@ void main() {
 
     await tester.tap(find.byTooltip('More options'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Talk to our team'));
+    await tester.tap(_menu('Talk to our team'));
     await settle(tester);
     final body = jsonDecode(server.bodies['/chat']!.last) as Map<String, dynamic>;
     expect(body['message'], "I'd like to talk to someone from your team");
@@ -184,7 +184,7 @@ void main() {
     await tester.tap(find.byTooltip('More options'));
     await tester.pumpAndSettle();
     expect(find.text('Help center'), findsOneWidget);
-    expect(find.text('Talk to our team'), findsNothing);
+    expect(_menu('Talk to our team'), findsNothing);
     await tester.tapAt(const Offset(5, 400)); // dismiss
     await tester.pumpAndSettle();
     hold.complete();
@@ -192,7 +192,7 @@ void main() {
     expect(c.busy, isFalse);
     await tester.tap(find.byTooltip('More options'));
     await tester.pumpAndSettle();
-    expect(find.text('Talk to our team'), findsOneWidget);
+    expect(_menu('Talk to our team'), findsOneWidget);
     await tester.tapAt(const Offset(5, 400));
     await tester.pumpAndSettle();
     await finish(tester);
@@ -224,7 +224,7 @@ void main() {
     await settle(tester);
     await tester.tap(find.byTooltip('خيارات أكثر'));
     await tester.pumpAndSettle();
-    expect(find.text('احكي مع الفريق'), findsOneWidget);
+    expect(_menu('احكي مع الفريق'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tapAt(const Offset(5, 600));
     await tester.pumpAndSettle();
@@ -259,10 +259,15 @@ void main() {
     }
     final composer = tester.getTopLeft(find.byType(TextField)).dy;
     expect(find.text('reply 7'), findsOneWidget);
-    final newest = tester.getBottomLeft(find.text('reply 7')).dy;
+    // The newest reply, then its quick replies, right above the composer.
+    expect(tester.getBottomLeft(find.text('reply 7')).dy, lessThan(tester.getTopLeft(find.text('Browse offers')).dy));
+    final newest = tester.getBottomLeft(find.text('Browse offers')).dy;
     expect(newest, lessThan(composer));
     expect(composer - newest, lessThan(80));
     expect(find.text('Hello, how can we help?'), findsNothing);
     await finish(tester);
   });
 }
+
+/// The ⋮ menu's item (the quick-reply chip with the same text is on the page too).
+Finder _menu(String text) => find.descendant(of: find.byType(PopupMenuItem<VoidCallback>), matching: find.text(text));

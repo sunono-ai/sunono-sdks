@@ -1,6 +1,19 @@
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart' show IconData, VoidCallback;
+
 import 'models.dart';
+
+/// An outlined chip under the latest reply (and on an empty thread): tapping
+/// it sends [message] as a synthetic turn, or runs [action] instead when set
+/// (e.g. open your offers screen). [icon] null = text only.
+class SunonoQuickReply {
+  const SunonoQuickReply(this.label, this.icon, this.message, {this.action});
+  final String label;
+  final IconData? icon;
+  final String message;
+  final VoidCallback? action;
+}
 
 /// Persists the anonymous shopper id across launches. Pass one backed by
 /// secure storage (e.g. `flutter_secure_storage`); [MemoryStorage] forgets it

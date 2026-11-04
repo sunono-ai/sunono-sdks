@@ -1,5 +1,9 @@
 // UI strings. Chrome follows the controller's language.
 
+import 'package:flutter/material.dart' show Icons;
+
+import '../core/host.dart';
+
 class SunonoCopy {
   const SunonoCopy._(this._ar);
   final bool _ar;
@@ -15,9 +19,13 @@ class SunonoCopy {
   String get attachPhoto => _t('أرفق صورة', 'Attach a photo');
   String get removePhoto => _t('شيل الصورة', 'Remove photo');
   String get welcome => _t('أهلاً بك! كيف يمكنني مساعدتك اليوم؟', 'Hi! How can I help you today?');
-  List<String> get starters => _ar
-      ? const ['شو في جديد عندكم؟', 'بدي أتابع طلبي', 'في عروض هلأ؟']
-      : const ["What's new?", 'Track my order', 'Any offers?'];
+
+  /// The default chips: offers, and the team (the same escalate phrase as the ⋮ item).
+  List<SunonoQuickReply> get quickReplies => [
+        SunonoQuickReply(_t('شو العروض؟', 'Browse offers'), Icons.local_offer_outlined,
+            _t('شو العروض عندكم؟', 'What offers do you have?')),
+        SunonoQuickReply(talkToTeam, Icons.headset_mic_outlined, escalatePhrase),
+      ];
   String get storeTeam => _t('خدمة العملاء', 'Store team');
   String get viewImage => _t('اعرض الصورة', 'View photo');
   String get close => _t('إغلاق', 'Close');

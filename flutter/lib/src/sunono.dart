@@ -29,8 +29,12 @@ abstract final class Sunono {
   ///   for [CheckoutIntent]; the handoff button then reads «كمّل الطلب» /
   ///   "Complete your order" instead of «…بالموقع» / "…on the site".
   /// - [pickImage]: enables photo messages.
-  /// - [starterPrompts]: replaces the empty-thread starter chips per language,
-  ///   e.g. `{'ar': ['شو في جديد؟'], 'en': ["What's new?"]}`; `[]` shows none.
+  /// - [quickReplies]: the chips under the latest reply and on an empty
+  ///   thread, per language, e.g.
+  ///   `{'en': [SunonoQuickReply('Gift ideas', Icons.redeem, 'Any gift ideas?')]}`;
+  ///   `[]` shows none. Defaults: "Browse offers" and "Talk to our team".
+  /// - [starterPrompts]: deprecated, use [quickReplies]; text-only chips per
+  ///   language, used where [quickReplies] has none.
   /// - [locale]: `ar` / `en`; null follows the shop's `default_language`.
   /// - [theme]: null follows the shop's dashboard color over your Material theme.
   /// - [onIntent]: route product/cart/checkout taps; return true if handled.
@@ -45,6 +49,7 @@ abstract final class Sunono {
     Future<SunonoImage?> Function()? pickImage,
     bool Function(SunonoIntent intent)? onIntent,
     Map<String, List<String>>? starterPrompts,
+    Map<String, List<SunonoQuickReply>>? quickReplies,
     SunonoTheme? theme,
     http.Client Function()? httpClientFactory,
   }) {
@@ -64,6 +69,7 @@ abstract final class Sunono {
       nativeCheckout: nativeCheckout,
       onIntent: onIntent,
       starterPrompts: starterPrompts,
+      quickReplies: quickReplies,
     );
   }
 
