@@ -514,10 +514,10 @@ class CartBar extends StatelessWidget {
                           const SizedBox(width: 8),
                           ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: box.maxWidth * 0.4),
-                            child: Text(formatFils(cart.totalFils, lang),
+                            child: _ltr(Text(formatFils(cart.totalFils, lang),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primaryText)),
+                                style: theme.text(size: 13, weight: FontWeight.w700, color: theme.primaryText))),
                           ),
                         ],
                         const SizedBox(width: 4),
@@ -569,7 +569,7 @@ class CheckoutCardView extends StatelessWidget {
         for (final d in details) {
           rows.add(_row(d.label(contentLang), d.value ?? '', note: amend ? d.note : null));
         }
-        if (savingsText != null) rows.add(_row(t.savings, savingsText, accent: true));
+        if (savingsText != null) rows.add(_row(t.savings, savingsText, accent: true, money: true));
         if (totalText != null) {
           rows.add(_total(t.total, totalText));
           if (serviceFeeText != null) rows.add(_small(t.serviceFeeIncluded(serviceFeeText)));
@@ -579,14 +579,19 @@ class CheckoutCardView extends StatelessWidget {
         title = t.placedTitle;
         if (p.orderNumber != null) rows.add(_row(t.orderNumber, p.orderNumber!));
         for (final l in p.lines) {
-          rows.add(_row('${l.name(contentLang)} × ${l.qty}', formatFils(l.subtotalFils ?? 0, contentLang)));
+          // «× 2» is isolated and glued to the name: it never flips or wraps apart.
+          rows.add(_row(
+              '${l.name(contentLang)}\u00A0\u2066×\u00A0${l.qty}\u2069', formatFils(l.subtotalFils ?? 0, contentLang),
+              money: true));
         }
         if (p.deliveryFeeFils != null) {
           rows.add(_row(
               t.delivery, p.deliveryFeeFils == 0 ? t.freeDelivery : formatFils(p.deliveryFeeFils, contentLang),
-              accent: p.deliveryFeeFils == 0));
+              accent: p.deliveryFeeFils == 0, money: p.deliveryFeeFils != 0));
         }
-        if ((p.savingsFils ?? 0) > 0) rows.add(_row(t.savings, formatFils(p.savingsFils, contentLang), accent: true));
+        if ((p.savingsFils ?? 0) > 0) {
+          rows.add(_row(t.savings, formatFils(p.savingsFils, contentLang), accent: true, money: true));
+        }
         if (p.totalFils != null) rows.add(_total(t.total, formatFils(p.totalFils, contentLang)));
         if ((p.serviceFeeFils ?? 0) > 0) {
           rows.add(_small(t.serviceFeeIncluded(formatFils(p.serviceFeeFils, contentLang))));
@@ -625,9 +630,10 @@ class CheckoutCardView extends StatelessWidget {
 
   /// A value in its own direction: a phone, order number, email or Latin
   /// address stays left to right in an Arabic card (`+962…`, not `…962+`).
+  /// [money] is always isolated, like the product cards' prices («12.5 د.أ»).
   /// [end] aligns it to the card's end side (else its start side).
-  Widget _value(String value, TextStyle style, {bool end = true}) {
-    if (isRtlText(value, fallbackRtl: false)) {
+  Widget _value(String value, TextStyle style, {bool end = true, bool money = false}) {
+    if (!money && isRtlText(value, fallbackRtl: false)) {
       return Text(value, textAlign: end ? TextAlign.end : TextAlign.start, style: style);
     }
     return Builder(builder: (context) {
@@ -645,7 +651,9 @@ class CheckoutCardView extends StatelessWidget {
         ]),
       );
 
-  Widget _row(String label, String value, {String? note, bool pending = false, bool accent = false}) => Padding(
+  Widget _row(String label, String value,
+          {String? note, bool pending = false, bool accent = false, bool money = false}) =>
+      Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -661,7 +669,8 @@ class CheckoutCardView extends StatelessWidget {
                   theme.text(
                       size: 13,
                       weight: FontWeight.w600,
-                      color: pending ? theme.muted : (accent ? theme.success : theme.onSurface))),
+                      color: pending ? theme.muted : (accent ? theme.success : theme.onSurface)),
+                  money: money),
             ),
           ]),
           if (note != null) Text(note, style: theme.text(size: 12, color: theme.accentText)),
@@ -675,7 +684,9 @@ class CheckoutCardView extends StatelessWidget {
         child: Row(children: [
           Expanded(child: Text(label, style: theme.text(size: 14, weight: FontWeight.w700))),
           const SizedBox(width: 8),
-          Expanded(child: _value(value, theme.text(size: 15, weight: FontWeight.w800, color: theme.primaryText))),
+          Expanded(
+              child:
+                  _value(value, theme.text(size: 15, weight: FontWeight.w800, color: theme.primaryText), money: true)),
         ]),
       );
 

@@ -475,7 +475,7 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('starterPrompts still work as text-only quick replies; quickReplies wins and can run an action',
+    testWidgets('starterPrompts stay on the empty thread only (0.2); quickReplies wins, caps at 3, can run an action',
         (tester) async {
       await tester.pumpWidget(app(SunonoChatView(
           controller: make('en', starters: {
@@ -488,7 +488,9 @@ void main() {
       await tester.tap(find.text('Gift ideas'));
       await settle(tester);
       expect((jsonDecode(server.bodies['/chat']!.last) as Map)['message'], 'Gift ideas');
-      expect(find.widgetWithText(InkWell, 'Gift ideas'), findsOneWidget, reason: 'under the reply too');
+      expect(find.widgetWithText(InkWell, 'Gift ideas'), findsNothing, reason: 'starters never sit under a reply');
+      expect(find.text('Browse offers'), findsOneWidget, reason: 'the defaults do');
+      expect(find.text('Talk to our team'), findsOneWidget);
       await finish(tester);
 
       var opened = 0;
@@ -496,11 +498,18 @@ void main() {
           controller: make('en', starters: {
         'en': ['Gift ideas']
       }, quick: {
-        'en': [SunonoQuickReply('Offers page', Icons.local_offer_outlined, 'unused', action: () => opened++)],
+        'en': [
+          SunonoQuickReply('Offers page', Icons.local_offer_outlined, 'unused', action: () => opened++),
+          const SunonoQuickReply('Two', null, 'two'),
+          const SunonoQuickReply('Three', null, 'three'),
+          const SunonoQuickReply('Four', null, 'four'),
+        ],
         'ar': const [],
       }))));
       await settle(tester);
       expect(find.text('Gift ideas'), findsNothing);
+      expect(find.text('Three'), findsOneWidget);
+      expect(find.text('Four'), findsNothing, reason: 'at most 3');
       final sends = server.bodies['/chat']!.length;
       await tester.tap(find.text('Offers page'));
       await settle(tester);

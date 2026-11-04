@@ -190,6 +190,43 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('Arabic placed card: money is LTR-isolated, «× qty» is isolated and glued to the name', (tester) async {
+      await turn(tester, 'ar', {
+        'order_placed': true,
+        'savings_fils': 1000,
+        'order': {
+          'order_number': '1007',
+          'items': [
+            {'product_id': 'p1', 'name_ar': 'قهوة', 'qty': 2, 'subtotal_fils': 12500},
+          ],
+          'delivery_fee_fils': 2000,
+          'total_fils': 14500,
+        },
+      });
+      for (final money in ['12.5 د.أ', '2 د.أ', '14.5 د.أ']) {
+        expect(dirOf(tester, money), TextDirection.ltr, reason: money);
+      }
+      expect(find.text('قهوة\u00A0\u2066×\u00A02\u2069'), findsOneWidget);
+      await finish(tester);
+    });
+
+    testWidgets('Arabic review total and savings are LTR-isolated; cart bar total too', (tester) async {
+      await turn(tester, 'ar', {
+        ...confirm,
+        'savings_text': '1 د.أ',
+        'cart_summary': {
+          'items': [
+            {'product_id': 'p1', 'name_ar': 'قهوة', 'qty': 1, 'subtotal_fils': 8500},
+          ],
+          'total_fils': 8500,
+        },
+      });
+      expect(dirOf(tester, '12.500 د.أ'), TextDirection.ltr);
+      expect(dirOf(tester, '1 د.أ'), TextDirection.ltr);
+      expect(dirOf(tester, '8.5 د.أ'), TextDirection.ltr, reason: 'cart bar');
+      await finish(tester);
+    });
+
     testWidgets('a known phone in the collect card is LTR too', (tester) async {
       await turn(tester, 'ar', {
         'order_collect': true,

@@ -197,12 +197,13 @@ class _SunonoChatViewState extends State<SunonoChatView> {
       // while the assistant can take a turn (idle, not paused).
       final idle = !_c.busy && !_c.paused && _c.status == ChatStatus.ready;
       final last = msgs.lastOrNull;
-      final replies = !idle
-          ? const <SunonoQuickReply>[]
-          : (_c.quickReplies?[lang] ??
-              _c.starterPrompts?[lang]?.map((p) => SunonoQuickReply(p, null, p)).toList() ??
-              t.quickReplies);
-      final quick = replies.isEmpty
+      // The host's quick replies (at most 3), else the defaults. Legacy
+      // starterPrompts stay on the empty thread only, as in 0.2.
+      final chips = (_c.quickReplies?[lang] ?? t.quickReplies).take(3).toList();
+      final starters = _c.quickReplies?[lang] == null
+          ? (_c.starterPrompts?[lang]?.map((p) => SunonoQuickReply(p, null, p)).toList())
+          : null;
+      Widget? quickRow(List<SunonoQuickReply> replies) => !idle || replies.isEmpty
           ? null
           : Padding(
               padding: const EdgeInsets.only(top: 10),
@@ -263,7 +264,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                     timed: false,
                     dayLabel: msgs.isEmpty ? null : dayAbove(0),
                     avatar: msgs.isEmpty || !botish(msgs.first),
-                    footer: msgs.isEmpty ? quick : null,
+                    footer: msgs.isEmpty ? quickRow(starters ?? chips) : null,
                   );
                 }
                 return _MessageItem(
@@ -277,7 +278,7 @@ class _SunonoChatViewState extends State<SunonoChatView> {
                   dayLabel: index == 0 ? null : dayAbove(index),
                   // The avatar marks the last bubble of a run of bot/staff messages.
                   avatar: index == msgs.length - 1 || !botish(msgs[index + 1]),
-                  footer: index == msgs.length - 1 && quickOnLast ? quick : null,
+                  footer: index == msgs.length - 1 && quickOnLast ? quickRow(chips) : null,
                   onClose: widget.onClose,
                 );
               },

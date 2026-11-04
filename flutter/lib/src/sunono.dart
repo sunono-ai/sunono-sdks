@@ -32,9 +32,9 @@ abstract final class Sunono {
   /// - [quickReplies]: the chips under the latest reply and on an empty
   ///   thread, per language, e.g.
   ///   `{'en': [SunonoQuickReply('Gift ideas', Icons.redeem, 'Any gift ideas?')]}`;
-  ///   `[]` shows none. Defaults: "Browse offers" and "Talk to our team".
-  /// - [starterPrompts]: deprecated, use [quickReplies]; text-only chips per
-  ///   language, used where [quickReplies] has none.
+  ///   at most 3, `[]` shows none. Defaults: "Browse offers" and "Talk to our team".
+  /// - [starterPrompts]: deprecated, use [quickReplies]; text-only chips on
+  ///   the empty thread only, per language, where [quickReplies] has none.
   /// - [locale]: `ar` / `en`; null follows the shop's `default_language`.
   /// - [theme]: null follows the shop's dashboard color over your Material theme.
   /// - [onIntent]: route product/cart/checkout taps; return true if handled.

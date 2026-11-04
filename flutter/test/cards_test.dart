@@ -8,7 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
-import 'package:sunono/src/ui/cards.dart' show ProductCarousel, ProductTile;
+import 'package:sunono/src/ui/cards.dart' show HandoffButton, ProductCarousel, ProductTile;
 import 'package:sunono/src/ui/theme.dart' show contrastRatio;
 import 'package:sunono/sunono.dart';
 
@@ -488,8 +488,14 @@ void main() {
     });
   });
 
-  testWidgets('Add stays visible on a white or black brand (3:1 fill, 4.5:1 label)', (tester) async {
-    for (final (brand, dark) in [(Colors.white, false), (Colors.black, true)]) {
+  testWidgets('Add stays visible on white, black, gold and pastel brands (3:1 fill, 4.5:1 label)', (tester) async {
+    for (final (brand, dark) in [
+      (Colors.white, false),
+      (Colors.black, true),
+      (const Color(0xFFF2A900), false), // gold
+      (const Color(0xFFF8C8DC), false), // pastel pink
+      (const Color(0xFFF2A900), true),
+    ]) {
       final theme = SunonoTheme.flat(primary: brand, dark: dark);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -504,6 +510,20 @@ void main() {
       final fill = (ink.decoration! as BoxDecoration).color!;
       expect(contrastRatio(fill, theme.surface), greaterThanOrEqualTo(3), reason: '$brand fill');
       final label = tester.widget<Text>(find.text('Add to cart')).style!.color!;
+      expect(contrastRatio(label, fill), greaterThanOrEqualTo(4.5), reason: '$brand label');
+    }
+  });
+
+  testWidgets('the handoff button stays visible on gold and pastel brands', (tester) async {
+    for (final brand in [const Color(0xFFF2A900), const Color(0xFFF8C8DC), Colors.white]) {
+      final theme = SunonoTheme.flat(primary: brand);
+      await tester.pumpWidget(
+          MaterialApp(home: Scaffold(body: HandoffButton(theme: theme, label: 'Complete your order', onTap: () {}))));
+      final fill = tester
+          .widget<Material>(find.ancestor(of: find.byType(InkWell), matching: find.byType(Material)).first)
+          .color!;
+      expect(contrastRatio(fill, theme.chatBackground), greaterThanOrEqualTo(3), reason: '$brand fill');
+      final label = tester.widget<Text>(find.text('Complete your order')).style!.color!;
       expect(contrastRatio(label, fill), greaterThanOrEqualTo(4.5), reason: '$brand label');
     }
   });

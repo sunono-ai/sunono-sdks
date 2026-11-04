@@ -178,13 +178,14 @@ class SunonoChatController extends ChangeNotifier with WidgetsBindingObserver {
   /// Returns true when the host handled the intent.
   bool Function(SunonoIntent intent)? onIntent;
 
-  /// Deprecated: use [quickReplies]. Text-only quick replies by language
-  /// (`ar` / `en`), used when [quickReplies] has none for that language.
+  /// Deprecated: use [quickReplies]. Text-only chips on the empty thread only
+  /// (as in 0.2), by language (`ar` / `en`), when [quickReplies] has none for
+  /// that language.
   final Map<String, List<String>>? starterPrompts;
 
   /// The chips under the latest reply and on an empty thread, by language
-  /// (`ar` / `en`). A missing language falls back to [starterPrompts], then
-  /// the SDK defaults ("Browse offers", "Talk to our team"); `[]` shows none.
+  /// (`ar` / `en`), at most 3. A missing language uses the SDK defaults
+  /// ("Browse offers", "Talk to our team"); `[]` shows none.
   final Map<String, List<SunonoQuickReply>>? quickReplies;
 
   /// Delays between history checks while recovering (cumulative waits).
