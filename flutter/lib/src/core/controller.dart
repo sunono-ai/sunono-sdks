@@ -97,7 +97,7 @@ class ChatMessage {
     this.hasMore = false,
     this.checkout,
     CheckoutHandoff? handoff,
-    String? handoffUrl,
+    @Deprecated("Use handoff: (url: …, target: 'checkout'). Removed in 1.0.") String? handoffUrl,
     this.orderIds,
     this.msgRef,
     this.clientRef,

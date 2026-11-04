@@ -1,0 +1,42 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+/build/
+/coverage/
+
+# Golden mismatch output (flutter test writes it next to the goldens)
+failures/
+
+# Pub only (.pubignore replaces .gitignore for `dart pub publish`):
+# the golden tests, their pixel files and the test fonts (with their OFL.txt)
+# stay in the repo and out of the package, so no font ships with it.
+test/fonts/
+test/goldens/
+example/build/
+example/.dart_tool/
